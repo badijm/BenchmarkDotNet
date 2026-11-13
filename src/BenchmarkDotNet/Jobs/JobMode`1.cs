@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Characteristics;
+using BenchmarkDotNet.Characteristics;
 using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.Jobs
@@ -11,6 +11,6 @@ namespace BenchmarkDotNet.Jobs
 
         protected JobMode(string id) : base(id) { }
 
-        [PublicAPI] public Job Job => OwnerOrSelf as Job;
+        [PublicAPI] public Job Job => (Job) OwnerOrSelf;
     }
 }

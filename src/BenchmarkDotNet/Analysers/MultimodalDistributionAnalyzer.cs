@@ -1,9 +1,7 @@
-﻿using System.Collections.Generic;
-using System.Globalization;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Reports;
-using JetBrains.Annotations;
 using Perfolizer.Mathematics.Multimodality;
+using System.Globalization;
 
 namespace BenchmarkDotNet.Analysers
 {
@@ -21,7 +19,7 @@ namespace BenchmarkDotNet.Analysers
             if (statistics == null || statistics.N < EngineResolver.DefaultMinWorkloadIterationCount)
                 yield break;
 
-            double mValue = MValueCalculator.Calculate(statistics.OriginalValues);
+            double mValue = MValueCalculator.Calculate(statistics.Sample.Values);
             if (mValue > 4.2)
                 yield return Create("is multimodal", mValue, report, summary.GetCultureInfo());
             else if (mValue > 3.2)

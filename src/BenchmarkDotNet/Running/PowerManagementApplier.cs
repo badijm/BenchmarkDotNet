@@ -1,13 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Loggers;
-using BenchmarkDotNet.Portability;
 
 namespace BenchmarkDotNet.Running
 {
-    internal class PowerManagementApplier : IDisposable
+    internal class PowerManagementApplier : DisposeAtProcessTermination
     {
         private static readonly Guid UserPowerPlan = new Guid("67b4a053-3646-4532-affd-0535c9ea82a7");
 
@@ -27,13 +25,17 @@ namespace BenchmarkDotNet.Running
 
         internal PowerManagementApplier(ILogger logger) => this.logger = logger;
 
-        public void Dispose() => ApplyUserPowerPlan();
+        protected override void Dispose(bool exiting)
+        {
+            ApplyUserPowerPlan();
+            base.Dispose(exiting);
+        }
 
         internal static Guid Map(PowerPlan value) => PowerPlansDict[value];
 
         internal void ApplyPerformancePlan(Guid id)
         {
-            if (!RuntimeInformation.IsWindows() || id == Guid.Empty)
+            if (!OsDetector.IsWindows() || id == Guid.Empty)
                 return;
 
             if (id != UserPowerPlan)
@@ -44,26 +46,32 @@ namespace BenchmarkDotNet.Running
 
         private void ApplyUserPowerPlan()
         {
-            if (powerPlanChanged && RuntimeInformation.IsWindows())
+            if (!powerPlanChanged)
+                return;
+
+            if (!OsDetector.IsWindows7OrLater())
+                return;
+
+            try
             {
-                try
+                if (userCurrentPowerPlan != null && PowerManagementHelper.Set(userCurrentPowerPlan.Value))
                 {
-                    if (userCurrentPowerPlan != null && PowerManagementHelper.Set(userCurrentPowerPlan.Value))
-                    {
-                        powerPlanChanged = false;
-                        var powerPlanFriendlyName = PowerManagementHelper.CurrentPlanFriendlyName;
-                        logger.WriteLineInfo($"Successfully reverted power plan (GUID: {userCurrentPowerPlan.Value} FriendlyName: {powerPlanFriendlyName})");
-                    }
+                    powerPlanChanged = false;
+                    var powerPlanFriendlyName = PowerManagementHelper.CurrentPlanFriendlyName;
+                    logger.WriteLineInfo($"Successfully reverted power plan (GUID: {userCurrentPowerPlan.Value} FriendlyName: {powerPlanFriendlyName})");
                 }
-                catch (Exception ex)
-                {
-                    logger.WriteLineError($"Cannot revert power plan (error message: {ex.Message})");
-                }
+            }
+            catch (Exception ex)
+            {
+                logger.WriteLineError($"Cannot revert power plan (error message: {ex.Message})");
             }
         }
 
         private void ApplyPlanByGuid(Guid guid)
         {
+            if (!OsDetector.IsWindows7OrLater())
+                return;
+
             try
             {
                 if (isInitialized == false)

@@ -1,6 +1,4 @@
-﻿using System.Linq;
 using BenchmarkDotNet.Environments;
-using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.Reports
 {

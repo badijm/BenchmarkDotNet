@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\build\common.props" />
+  <PropertyGroup>
+    <AssemblyTitle>BenchmarkDotNet plotting export support.</AssemblyTitle>
+    <TargetFrameworks>netstandard2.0</TargetFrameworks>
+    <AssemblyName>BenchmarkDotNet.Exporters.Plotting</AssemblyName>
+    <PackageId>BenchmarkDotNet.Exporters.Plotting</PackageId>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RootNamespace>BenchmarkDotNet.Exporters.Plotting</RootNamespace>
+    <!-- needed for docfx xref resolver -->
+    <ProduceReferenceAssembly>True</ProduceReferenceAssembly>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BenchmarkDotNet\BenchmarkDotNet.csproj" />
+  </ItemGroup>
+  <!-- Settings for PolySharp -->
+  <PropertyGroup>
+    <PolySharpIncludeGeneratedTypes>
+      System.Diagnostics.CodeAnalysis.NotNullWhenAttribute
+    </PolySharpIncludeGeneratedTypes>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="ScottPlot" Version="5.1.59" />
+    <PackageReference Include="PolySharp" Version="1.16.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\BenchmarkDotNet\Extensions\StringAndTextExtensions.cs" Link="StringAndTextExtensions.cs" />
+  </ItemGroup>
+  <Import Project="..\..\build\common.targets" />
+</Project>

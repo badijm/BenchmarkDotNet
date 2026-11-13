@@ -1,0 +1,143 @@
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Exporters;
+using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Tests.Helpers;
+using BenchmarkDotNet.Tests.Infra;
+using BenchmarkDotNet.Tests.Mocks;
+using BenchmarkDotNet.Validators;
+using JetBrains.Annotations;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+
+namespace BenchmarkDotNet.Tests.Attributes
+{
+    [Collection("VerifyTests")]
+    public class ParamsAllValuesVerifyTests : IDisposable
+    {
+        private readonly CultureInfo initCulture;
+
+        public ParamsAllValuesVerifyTests() => initCulture = Thread.CurrentThread.CurrentCulture;
+
+        [UsedImplicitly]
+        public static TheoryData<Type> GetBenchmarkTypes()
+        {
+            var data = new TheoryData<Type>();
+            foreach (var type in typeof(Benchmarks).GetNestedTypes())
+                data.Add(type);
+            return data;
+        }
+
+        [Theory]
+        [MemberData(nameof(GetBenchmarkTypes))]
+        public async Task BenchmarkShouldProduceSummary(Type benchmarkType)
+        {
+            Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+
+            var logger = new AccumulationLogger();
+            logger.WriteLine("=== " + benchmarkType.Name + " ===");
+
+            var exporter = MarkdownExporter.Mock;
+            var summary = MockFactory.CreateSummary(benchmarkType);
+            await ((ExporterBase) exporter).ExportToLogAsync(summary, logger, CancellationToken.None);
+
+            var validator = ParamsAllValuesValidator.FailOnError;
+            var errors = await validator.ValidateAsync(new ValidationParameters(summary.BenchmarksCases, summary.BenchmarksCases.First().Config)).ToArrayAsync();
+            logger.WriteLine();
+            logger.WriteLine("Errors: " + errors.Length);
+            foreach (var error in errors)
+                logger.WriteLineError("* " + error.Message);
+
+            var settings = VerifyHelper.Create();
+            settings.UseTextForParameters(benchmarkType.Name);
+            await Verifier.Verify(logger.GetLog(), settings);
+        }
+
+        public void Dispose() => Thread.CurrentThread.CurrentCulture = initCulture;
+
+        public enum TestEnum
+        {
+            A = 1, B, C
+        }
+
+        [Flags]
+        public enum TestFlagsEnum
+        {
+            A = 0b001,
+            B = 0b010,
+            C = 0b100
+        }
+
+        [SuppressMessage("ReSharper", "InconsistentNaming")]
+        public static class Benchmarks
+        {
+            public class WithAllValuesOfBool
+            {
+                [ParamsAllValues]
+                public bool ParamProperty { get; set; }
+
+                [Benchmark]
+                public void Benchmark() { }
+            }
+
+            public class WithAllValuesOfEnum
+            {
+                [ParamsAllValues]
+                public TestEnum ParamProperty { get; set; }
+
+                [Benchmark]
+                public void Benchmark() { }
+            }
+
+            public class WithAllValuesOfNullableBool
+            {
+                [ParamsAllValues]
+                public bool? ParamProperty { get; set; }
+
+                [Benchmark]
+                public void Benchmark() { }
+            }
+
+            public class WithAllValuesOfNullableEnum
+            {
+                [ParamsAllValues]
+                public TestEnum? ParamProperty { get; set; }
+
+                [Benchmark]
+                public void Benchmark() { }
+            }
+
+#pragma warning disable BDN1304
+            public class WithNotAllowedTypeError
+            {
+                [ParamsAllValues]
+                public int ParamProperty { get; set; }
+
+                [Benchmark]
+                public void Benchmark() { }
+            }
+#pragma warning restore BDN1304
+
+#pragma warning disable BDN1304
+            public class WithNotAllowedNullableTypeError
+            {
+                [ParamsAllValues]
+                public int? ParamProperty { get; set; }
+
+                [Benchmark]
+                public void Benchmark() { }
+            }
+#pragma warning restore BDN1304
+
+#pragma warning disable BDN1303
+            public class WithNotAllowedFlagsEnumError
+            {
+                [ParamsAllValues]
+                public TestFlagsEnum ParamProperty { get; set; }
+
+                [Benchmark]
+                public void Benchmark() { }
+            }
+#pragma warning restore BDN1303
+        }
+    }
+}

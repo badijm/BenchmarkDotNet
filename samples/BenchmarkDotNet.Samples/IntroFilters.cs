@@ -1,4 +1,3 @@
-using System.Threading;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Filters;
@@ -17,8 +16,8 @@ namespace BenchmarkDotNet.Samples
             {
                 // benchmark with names which contains "A" OR "1"
                 AddFilter(new DisjunctionFilter(
-                    new NameFilter(name => name.Contains("A")),
-                    new NameFilter(name => name.Contains("1"))
+                    new NameFilter(name => name.Contains('A')),
+                    new NameFilter(name => name.Contains('1'))
                 ));
 
                 // benchmark with names with length < 3

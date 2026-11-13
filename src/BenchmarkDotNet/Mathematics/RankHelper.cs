@@ -1,8 +1,6 @@
-﻿using System;
-using System.Linq;
-using JetBrains.Annotations;
+using Perfolizer.Mathematics.Common;
 using Perfolizer.Mathematics.SignificanceTesting;
-using Perfolizer.Mathematics.Thresholds;
+using Perfolizer.Mathematics.SignificanceTesting.MannWhitney;
 
 namespace BenchmarkDotNet.Mathematics
 {
@@ -10,10 +8,7 @@ namespace BenchmarkDotNet.Mathematics
     {
         public static int[] GetRanks(params Statistics[] stats)
         {
-            var values = stats.
-                Select((s, index) => new { Stats = s, Index = index }).
-                OrderBy(pair => pair.Stats.Mean).
-                ToArray();
+            var values = stats.Select((s, index) => new { Stats = s, Index = index }).OrderBy(pair => pair.Stats.Mean).ToArray();
 
             int n = values.Length;
             var ranks = new int[n];
@@ -34,14 +29,13 @@ namespace BenchmarkDotNet.Mathematics
 
         private static bool AreSame(Statistics x, Statistics y)
         {
-            if (x.N >= 3 && y.N >= 3)
-            {
-                var tost = StatisticalTestHelper.CalculateTost(MannWhitneyTest.Instance, x.SortedValues.ToArray(), y.SortedValues.ToArray(), RelativeThreshold.Default);
-                if (tost.Conclusion != EquivalenceTestConclusion.Unknown)
-                    return tost.Conclusion == EquivalenceTestConclusion.Same;
-            }
-
-            return Math.Abs(x.Mean - y.Mean) < Math.Abs(x.Mean + y.Mean) / 2 * 0.01;
+            // See ZeroMeasurementHelper: moving to Pragmastat.Toolkit.Compare2 would change the
+            // computed ranks, so it needs its own change rather than riding along with a bump.
+#pragma warning disable CS0618 // Type or member is obsolete
+            var test = new SimpleEquivalenceTest(MannWhitneyTest.Instance);
+#pragma warning restore CS0618
+            var comparisonResult = test.Perform(x.Sample, y.Sample, MathHelper.DefaultThreshold, MathHelper.DefaultSignificanceLevel);
+            return comparisonResult == ComparisonResult.Indistinguishable;
         }
     }
 }

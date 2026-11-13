@@ -1,6 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Extensions;
 
@@ -21,10 +18,10 @@ namespace BenchmarkDotNet.Helpers
                                                               .Select(x => x.GenericTypeArguments)
                                                               .ToArray();
 
-            if (typeArguments.Any())
+            if (typeArguments.Length != 0)
                 return BuildGenericTypes(type, typeArguments);
 
-            return new (bool isSuccess, Type result)[] { (true,  type) };
+            return [(true, type)];
         }
 
         private static IEnumerable<(bool isSuccess, Type result)> BuildGenericTypes(Type type, IEnumerable<Type[]> typeArguments)

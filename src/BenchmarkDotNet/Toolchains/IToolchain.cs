@@ -1,19 +1,16 @@
-﻿using System.Collections.Generic;
 using BenchmarkDotNet.Characteristics;
+using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
-using JetBrains.Annotations;
 
-namespace BenchmarkDotNet.Toolchains
+namespace BenchmarkDotNet.Toolchains;
+
+public interface IToolchain
 {
-    public interface IToolchain
-    {
-        [PublicAPI] string Name { get; }
-        IGenerator Generator { get; }
-        IBuilder Builder { get; }
-        IExecutor Executor { get; }
-        bool IsInProcess { get; }
+    Runtime Runtime { get; }
+    IBuilder Builder { get; }
+    IExecutor Executor { get; }
+    bool IsInProcess { get; }
 
-        IEnumerable<ValidationError> Validate(BenchmarkCase benchmarkCase, IResolver resolver);
-    }
+    IAsyncEnumerable<ValidationError> ValidateAsync(BenchmarkCase benchmarkCase, IResolver resolver);
 }

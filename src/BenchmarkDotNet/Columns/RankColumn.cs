@@ -1,5 +1,4 @@
-﻿using System;
-using System.Linq;
+using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
@@ -24,13 +23,14 @@ namespace BenchmarkDotNet.Columns
         {
             var logicalGroup = summary
                 .GetLogicalGroupForBenchmark(benchmarkCase)
-                .Where(b => summary[b].ResultStatistics != null)
+                .Where(b => summary[b]?.ResultStatistics != null)
+                .WhereNotNull()
                 .ToArray();
             int index = Array.IndexOf(logicalGroup, benchmarkCase);
             if (index == -1)
-                return "?";
+                return MetricColumn.UnknownRepresentation;
 
-            var ranks = RankHelper.GetRanks(logicalGroup.Select(b => summary[b].ResultStatistics).ToArray());
+            var ranks = RankHelper.GetRanks(logicalGroup.Select(b => summary[b]!.ResultStatistics!).ToArray());
             int rank = ranks[index];
             return numeralSystem.ToPresentation(rank);
         }

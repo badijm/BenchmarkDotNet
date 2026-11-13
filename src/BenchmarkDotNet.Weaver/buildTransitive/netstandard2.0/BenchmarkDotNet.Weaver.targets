@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- The weaving logic is shared with BenchmarkDotNet.Annotations.targets. See the common file for details. -->
+  <Import Project="$(MSBuildThisFileDirectory)BenchmarkDotNet.Weaver.Common.targets" />
+</Project>

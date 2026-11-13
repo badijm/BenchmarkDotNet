@@ -1,10 +1,7 @@
-﻿using BenchmarkDotNet.Engines;
+using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Validators;
-using System;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace BenchmarkDotNet.Toolchains.Results
 {
@@ -32,8 +29,6 @@ namespace BenchmarkDotNet.Toolchains.Results
         public IReadOnlyList<string> Results { get; }
 
         internal readonly GcStats GcStats;
-        internal readonly ThreadingStats ThreadingStats;
-        internal readonly double ExceptionFrequency;
         private readonly List<string> errors;
         private readonly List<Measurement> measurements;
 
@@ -49,44 +44,49 @@ namespace BenchmarkDotNet.Toolchains.Results
             ExitCode = exitCode;
             PrefixedLines = prefixedLines;
             StandardOutput = standardOutput;
-            Parse(results, prefixedLines, launchIndex, out measurements, out errors, out GcStats, out ThreadingStats, out ExceptionFrequency);
+            Parse(results, prefixedLines, launchIndex, out measurements, out errors, out GcStats);
         }
 
-        internal ExecuteResult(List<Measurement> measurements, GcStats gcStats, ThreadingStats threadingStats, double exceptionFrequency)
+        internal ExecuteResult(List<Measurement> measurements, GcStats gcStats)
+            : this(measurements, gcStats, [])
+        {
+        }
+
+        private ExecuteResult(List<Measurement> measurements, GcStats gcStats, IReadOnlyList<string> prefixedLines)
         {
             FoundExecutable = true;
             ExitCode = 0;
-            errors = new List<string>();
-            PrefixedLines = Array.Empty<string>();
+            errors = [];
+            PrefixedLines = prefixedLines;
             this.measurements = measurements;
             GcStats = gcStats;
-            ThreadingStats = threadingStats;
-            ExceptionFrequency = exceptionFrequency;
+            StandardOutput = [];
+            Results = [];
         }
 
         internal ExecuteResult(List<Measurement> measurements)
         {
             FoundExecutable = true;
             ExitCode = 0;
-            errors = new List<string>();
-            PrefixedLines = Array.Empty<string>();
+            errors = [];
+            PrefixedLines = [];
             this.measurements = measurements;
             GcStats = GcStats.Empty;
-            ThreadingStats = ThreadingStats.Empty;
-            ExceptionFrequency = 0;
+            StandardOutput = [];
+            Results = [];
         }
 
-        internal static ExecuteResult FromRunResults(RunResults runResults, int exitCode)
+        internal static ExecuteResult FromRunResults(RunResults runResults, int exitCode, IReadOnlyList<string> prefixedLines)
             => exitCode != 0
-                ? CreateFailed(exitCode)
-                : new ExecuteResult(runResults.GetAllMeasurements().ToList(), runResults.GCStats, runResults.ThreadingStats, runResults.ExceptionFrequency);
+                ? new ExecuteResult(false, exitCode, default, [], prefixedLines, [], 0)
+                : new ExecuteResult([.. runResults.GetAllMeasurements()], runResults.GCStats, prefixedLines);
 
         internal static ExecuteResult CreateFailed(int exitCode = -1)
-            => new ExecuteResult(false, exitCode, default, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), 0);
+            => new(false, exitCode, default, [], [], [], 0);
 
         internal static ExecuteResult CreateFailed(string error)
         {
-            var result = new ExecuteResult(false, -1, default, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), 0);
+            var result = new ExecuteResult(false, -1, default, [], [], [], 0);
             result.errors.Add(error);
             return result;
         }
@@ -119,13 +119,11 @@ namespace BenchmarkDotNet.Toolchains.Results
         }
 
         private static void Parse(IReadOnlyList<string> results, IReadOnlyList<string> prefixedLines, int launchIndex, out List<Measurement> measurements,
-            out List<string> errors, out GcStats gcStats, out ThreadingStats threadingStats, out double exceptionFrequency)
+            out List<string> errors, out GcStats gcStats)
         {
-            measurements = new List<Measurement>();
-            errors = new List<string>();
+            measurements = [];
+            errors = [];
             gcStats = default;
-            threadingStats = default;
-            exceptionFrequency = 0;
 
             foreach (string line in results.Where(text => !string.IsNullOrEmpty(text)))
             {
@@ -140,19 +138,11 @@ namespace BenchmarkDotNet.Toolchains.Results
             {
                 if (line.StartsWith(ValidationErrorReporter.ConsoleErrorPrefix))
                 {
-                    errors.Add(line.Substring(ValidationErrorReporter.ConsoleErrorPrefix.Length).Trim());
+                    errors.Add(line[ValidationErrorReporter.ConsoleErrorPrefix.Length..].Trim());
                 }
                 else if (line.StartsWith(GcStats.ResultsLinePrefix))
                 {
                     gcStats = GcStats.Parse(line);
-                }
-                else if (line.StartsWith(ThreadingStats.ResultsLinePrefix))
-                {
-                    threadingStats = ThreadingStats.Parse(line);
-                }
-                else if (line.StartsWith(ExceptionsStats.ResultsLinePrefix))
-                {
-                    exceptionFrequency = ExceptionsStats.Parse(line);
                 }
             }
 
@@ -160,7 +150,6 @@ namespace BenchmarkDotNet.Toolchains.Results
             {
                 measurements.Clear();
                 gcStats = default;
-                threadingStats = default;
             }
         }
     }

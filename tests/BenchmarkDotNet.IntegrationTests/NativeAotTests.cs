@@ -1,42 +1,18 @@
-﻿using System;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.IntegrationTests.Diagnosers;
+using BenchmarkDotNet.IntegrationTests.Xunit;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Tests.XUnit;
 using BenchmarkDotNet.Toolchains.NativeAot;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
-    public class NativeAotTests : BenchmarkTestExecutor
+    public class NativeAotTests(ITestOutputHelper outputHelper) : BenchmarkTestExecutor(outputHelper)
     {
-        public NativeAotTests(ITestOutputHelper outputHelper) : base(outputHelper) { }
-
-        [FactDotNetCoreOnly("It's impossible to reliably detect the version of NativeAOT if the process is not a .NET Core or NativeAOT process")]
-        public void LatestNativeAotVersionIsSupported()
-        {
-            if (!RuntimeInformation.Is64BitPlatform()) // NativeAOT does not support 32bit yet
-                return;
-            if (ContinuousIntegration.IsGitHubActionsOnWindows()) // no native dependencies installed
-                return;
-            if (ContinuousIntegration.IsAppVeyorOnWindows())
-                return; // timeouts
-            if (RuntimeInformation.IsMacOS())
-                return; // currently not supported
-
-            var toolchain = NativeAotToolchain.CreateBuilder().UseNuGet().IlcInstructionSet(IsAvx2Supported() ? "avx2" : "").ToToolchain();
-
-            var config = ManualConfig.CreateEmpty()
-                .AddJob(Job.Dry
-                    .WithRuntime(NativeAotRuntime.GetCurrentVersion()) // we test against latest version for current TFM to make sure we avoid issues like #1055
-                    .WithToolchain(toolchain)
-                    .WithEnvironmentVariable(NativeAotBenchmark.EnvVarKey, IsAvx2Supported().ToString().ToLower()));
-
-            CanExecute<NativeAotBenchmark>(config);
-        }
-
         private bool IsAvx2Supported()
         {
 #if NET6_0_OR_GREATER
@@ -45,6 +21,79 @@ namespace BenchmarkDotNet.IntegrationTests
             return false;
 #endif
         }
+
+        private ManualConfig GetConfig()
+        {
+            // we test against latest version for current TFM to make sure we avoid issues like #1055
+            var toolchain = CsProjNativeAotToolchain.From(NativeAotRuntime.GetCurrentVersion(),
+                new NativeAotSettings { InstructionSet = IsAvx2Supported() ? "avx2" : "" });
+
+            return ManualConfig.CreateEmpty()
+                .AddJob(Job.Dry
+                    .WithToolchain(toolchain)
+                    .WithEnvironmentVariable(NativeAotBenchmark.EnvVarKey, IsAvx2Supported().ToString().ToLower()));
+        }
+
+        // BenchmarkDotNet itself is not trim or AOT safe, so publishing reports IL2104 and IL3053 for its assembly.
+        private const bool AllowWarnings = true;
+
+        [FactEnvSpecific("It's impossible to reliably detect the version of NativeAOT if the process is not a .NET Core or NativeAOT process", EnvRequirement.DotNetCoreOnly, EnvRequirement.NonGitHubDraftPR)]
+        public void LatestNativeAotVersionIsSupported()
+        {
+            if (!GetShouldRunTest())
+                return;
+
+            try
+            {
+                CanExecute<NativeAotBenchmark>(GetConfig(), allowWarnings: AllowWarnings);
+            }
+            catch (MisconfiguredEnvironmentException e)
+            {
+                if (ContinuousIntegration.IsLocalRun())
+                    Output.WriteLine(e.SkipMessage);
+                else
+                    throw;
+            }
+        }
+
+        [FactEnvSpecific("It's impossible to reliably detect the version of NativeAOT if the process is not a .NET Core or NativeAOT process", EnvRequirement.DotNetCoreOnly, EnvRequirement.NonGitHubDraftPR)]
+        public void NativeAotSupportsInProcessDiagnosers()
+        {
+            if (!GetShouldRunTest())
+                return;
+
+            try
+            {
+                var diagnoser = new MockInProcessDiagnoser1(BenchmarkDotNet.Diagnosers.RunMode.NoOverhead);
+                var config = GetConfig().AddDiagnoser(diagnoser);
+
+                try
+                {
+                    CanExecute<NativeAotBenchmark>(config, allowWarnings: AllowWarnings);
+                }
+                catch (MisconfiguredEnvironmentException e)
+                {
+                    if (ContinuousIntegration.IsLocalRun())
+                    {
+                        Output.WriteLine(e.SkipMessage);
+                        return;
+                    }
+                    throw;
+                }
+
+                Assert.Equal([diagnoser.ExpectedResult], diagnoser.Results.Values);
+                Assert.Equal([diagnoser.ExpectedResult], BaseMockInProcessDiagnoser.s_completedResults.Select(t => t.result));
+            }
+            finally
+            {
+                BaseMockInProcessDiagnoser.s_completedResults.Clear();
+            }
+        }
+
+        private static bool GetShouldRunTest()
+            => RuntimeInformation.Is64BitPlatform() // NativeAOT does not support 32bit yet
+                && !ContinuousIntegration.IsGitHubActionsOnWindows() // no native dependencies installed
+                && !OsDetector.IsMacOS(); // currently not supported
     }
 
     public class NativeAotBenchmark
@@ -57,7 +106,7 @@ namespace BenchmarkDotNet.IntegrationTests
             if (!RuntimeInformation.IsNativeAOT)
                 throw new Exception("This is NOT NativeAOT");
 #if NET6_0_OR_GREATER
-            if (System.Runtime.Intrinsics.X86.Avx2.IsSupported != bool.Parse(Environment.GetEnvironmentVariable(EnvVarKey)))
+            if (System.Runtime.Intrinsics.X86.Avx2.IsSupported != bool.Parse(Environment.GetEnvironmentVariable(EnvVarKey)!))
                 throw new Exception("Unexpected Instruction Set");
 #endif
         }

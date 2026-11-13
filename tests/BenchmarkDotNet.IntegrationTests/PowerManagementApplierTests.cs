@@ -1,10 +1,10 @@
-﻿using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.Detectors;
+using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Loggers;
 using BenchmarkDotNet.Tests.XUnit;
-using Xunit;
-using Xunit.Abstractions;
+using System.Globalization;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -14,31 +14,38 @@ namespace BenchmarkDotNet.IntegrationTests
 
         public PowerManagementApplierTests(ITestOutputHelper output) : base(output) { }
 
-        [FactWindowsOnly("Setting high-performance plan is suitable only on Windows")]
+        [FactEnvSpecific("Setting high-performance plan is suitable only on Windows", EnvRequirement.WindowsOnly)]
         public void TestSettingAndRevertingBackGuid()
         {
+            if (!OsDetector.IsWindows7OrLater())
+                return;
+
             var userPlan = PowerManagementHelper.CurrentPlan;
-            var powerManagementApplier = new PowerManagementApplier(new OutputLogger(Output));
+
+            using var powerManagementApplier = new PowerManagementApplier(new OutputLogger(Output));
 
             powerManagementApplier.ApplyPerformancePlan(PowerManagementApplier.Map(PowerPlan.HighPerformance));
 
             Assert.Equal(HighPerformancePlanGuid, PowerManagementHelper.CurrentPlan.ToString());
-            Assert.Equal("High performance", PowerManagementHelper.CurrentPlanFriendlyName);
-            powerManagementApplier.Dispose();
+
+            if (CultureInfo.CurrentUICulture.Name == "en-us")
+                Assert.Equal("High performance", PowerManagementHelper.CurrentPlanFriendlyName);
 
             Assert.Equal(userPlan, PowerManagementHelper.CurrentPlan);
         }
 
-        [FactWindowsOnly("Setting high-performance plan is suitable only on Windows")]
+        [FactEnvSpecific("Setting high-performance plan is suitable only on Windows", EnvRequirement.WindowsOnly)]
         public void TestPowerPlanShouldNotChange()
         {
+            if (!OsDetector.IsWindows7OrLater())
+                return;
+
             var userPlan = PowerManagementHelper.CurrentPlan;
-            var powerManagementApplier = new PowerManagementApplier(new OutputLogger(Output));
+            using var powerManagementApplier = new PowerManagementApplier(new OutputLogger(Output));
 
             powerManagementApplier.ApplyPerformancePlan(PowerManagementApplier.Map(PowerPlan.UserPowerPlan));
 
             Assert.Equal(userPlan.ToString(), PowerManagementHelper.CurrentPlan.ToString());
-            powerManagementApplier.Dispose();
 
             Assert.Equal(userPlan, PowerManagementHelper.CurrentPlan);
         }

@@ -1,11 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Tests.XUnit;
 using JetBrains.Annotations;
-using Xunit;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Tests
 {
@@ -14,71 +11,94 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void GetCorrectCSharpTypeNameReturnsCSharpFriendlyTypeName()
         {
-            CheckCorrectTypeName("System.Int32", typeof(int));
-            CheckCorrectTypeName("System.Int32[]", typeof(int[]));
-            CheckCorrectTypeName("System.Int32[][]", typeof(int[][]));
-            CheckCorrectTypeName("System.Int32[,]", typeof(int[,]));
-            CheckCorrectTypeName("System.Tuple<System.Int16, System.Int32>[]", typeof(Tuple<short, int>[]));
-            CheckCorrectTypeName("System.ValueTuple<System.Int16, System.Int32>[]", typeof(ValueTuple<short, int>[]));
+            CheckCorrectTypeName("global::System.Int32", typeof(int));
+            CheckCorrectTypeName("global::System.Int32[]", typeof(int[]));
+            CheckCorrectTypeName("global::System.Int32[][]", typeof(int[][]));
+            CheckCorrectTypeName("global::System.Int32[,]", typeof(int[,]));
+            CheckCorrectTypeName("global::System.Tuple<global::System.Int16, global::System.Int32>[]", typeof(Tuple<short, int>[]));
+            CheckCorrectTypeName("global::System.ValueTuple<global::System.Int16, global::System.Int32>[]", typeof(ValueTuple<short, int>[]));
             CheckCorrectTypeName("void", typeof(void));
             CheckCorrectTypeName("void*", typeof(void*));
-            CheckCorrectTypeName("System.IEquatable<T>", typeof(IEquatable<>));
-            CheckCorrectTypeName("System.Type", typeof(Type));
+            CheckCorrectTypeName("global::System.IEquatable<T>", typeof(IEquatable<>));
+            CheckCorrectTypeName("global::System.Type", typeof(Type));
             // ReSharper disable once PossibleMistakenCallToGetType.2
-            CheckCorrectTypeName("System.Reflection.TypeInfo", typeof(string).GetType()); // typeof(string).GetType() == System.RuntimeType which is not public
+            CheckCorrectTypeName("global::System.Reflection.TypeInfo", typeof(string).GetType()); // typeof(string).GetType() == System.RuntimeType which is not public
         }
 
         [Fact]
         public void GetCorrectCSharpTypeNameSupportsGenericTypesPassedByReference()
         {
-            var byRefGenericType = typeof(GenericByRef).GetMethod(nameof(GenericByRef.TheMethod)).GetParameters().Single().ParameterType;
+            var byRefGenericType = typeof(GenericByRef).GetMethod(nameof(GenericByRef.TheMethod))!.GetParameters().Single().ParameterType;
 
-            CheckCorrectTypeName("System.ValueTuple<System.Int32, System.Int16>", byRefGenericType);
+            CheckCorrectTypeName("global::System.ValueTuple<global::System.Int32, global::System.Int16>", byRefGenericType);
         }
 
         public class GenericByRef
         {
-            public void TheMethod(ref ValueTuple<int, short> _) { }
+            public void TheMethod(ref (int, short) _) { }
         }
 
         [Fact]
         public void GetCorrectCSharpTypeNameSupportsNestedTypes()
         {
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.Nested", typeof(Nested));
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.Nested", typeof(Nested));
 
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedNonGeneric1.NestedNonGeneric2",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedNonGeneric1.NestedNonGeneric2",
                 typeof(NestedNonGeneric1.NestedNonGeneric2));
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedNonGeneric1.NestedGeneric2<System.Int16, System.Boolean, System.Decimal>",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedNonGeneric1.NestedGeneric2<global::System.Int16, global::System.Boolean, global::System.Decimal>",
                 typeof(NestedNonGeneric1.NestedGeneric2<short, bool, decimal>));
 
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedNonGeneric1.NestedGeneric2<System.Int16, System.Boolean, System.Decimal>.NestedNonGeneric3",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedNonGeneric1.NestedGeneric2<global::System.Int16, global::System.Boolean, global::System.Decimal>.NestedNonGeneric3",
                 typeof(NestedNonGeneric1.NestedGeneric2<short, bool, decimal>.NestedNonGeneric3));
 
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<System.Byte, System.SByte>",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<global::System.Byte, global::System.SByte>",
                 typeof(NestedGeneric1<byte, sbyte>));
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<System.Byte, System.SByte>.NonGeneric2",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<global::System.Byte, global::System.SByte>.NonGeneric2",
                 typeof(NestedGeneric1<byte, sbyte>.NonGeneric2));
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<System.Byte, System.SByte>.NonGeneric2.Generic3<System.Int16, System.Int32, System.Int64>",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<global::System.Byte, global::System.SByte>.NonGeneric2.Generic3<global::System.Int16, global::System.Int32, global::System.Int64>",
                 typeof(NestedGeneric1<byte, sbyte>.NonGeneric2.Generic3<short, int, long>));
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<System.Byte, System.SByte>.NonGeneric2.Generic3<System.Int16, System.Int32, System.Int64>.NonGeneric4",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<global::System.Byte, global::System.SByte>.NonGeneric2.Generic3<global::System.Int16, global::System.Int32, global::System.Int64>.NonGeneric4",
                 typeof(NestedGeneric1<byte, sbyte>.NonGeneric2.Generic3<short, int, long>.NonGeneric4));
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<System.Byte, System.SByte>.NonGeneric2.Generic3<System.Int16, System.Int32, System.Int64>.Generic4<System.Single, System.Double>",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<global::System.Byte, global::System.SByte>.NonGeneric2.Generic3<global::System.Int16, global::System.Int32, global::System.Int64>.Generic4<global::System.Single, global::System.Double>",
                 typeof(NestedGeneric1<byte, sbyte>.NonGeneric2.Generic3<short, int, long>.Generic4<float, double>));
 
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<T1, T2>",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<T1, T2>",
                 typeof(NestedGeneric1<,>));
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<T1, T2>.NonGeneric2.Generic3<V1, V2, V3>.NonGeneric4",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<T1, T2>.NonGeneric2.Generic3<V1, V2, V3>.NonGeneric4",
                 typeof(NestedGeneric1<,>.NonGeneric2.Generic3<,,>.NonGeneric4));
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<T1, T2>.NonGeneric2.Generic3<V1, V2, V3>.Generic4<W1, W2>",
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<T1, T2>.NonGeneric2.Generic3<V1, V2, V3>.Generic4<W1, W2>",
                 typeof(NestedGeneric1<,>.NonGeneric2.Generic3<,,>.Generic4<,>));
+        }
+
+        [Fact]
+        public void GetCorrectCSharpTypeNameWritesUnboundGenericDefinitions()
+        {
+            CheckCorrectUnboundTypeName("global::System.IEquatable<>", typeof(IEquatable<>));
+            CheckCorrectUnboundTypeName("global::System.Collections.Generic.Dictionary<,>", typeof(Dictionary<,>));
+            CheckCorrectUnboundTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<,>.NonGeneric2",
+                typeof(NestedGeneric1<,>.NonGeneric2));
+            CheckCorrectUnboundTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedGeneric1<,>.NonGeneric2.Generic3<,,>.Generic4<,>",
+                typeof(NestedGeneric1<,>.NonGeneric2.Generic3<,,>.Generic4<,>));
+
+            // Types that are not generic definitions are unaffected.
+            CheckCorrectUnboundTypeName("global::System.Int32", typeof(int));
+            CheckCorrectUnboundTypeName("global::System.Collections.Generic.Dictionary<global::System.Int32, global::System.String>", typeof(Dictionary<int, string>));
+            CheckCorrectUnboundTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.NestedNonGeneric1.NestedGeneric2<global::System.Int16, global::System.Boolean, global::System.Decimal>.NestedNonGeneric3",
+                typeof(NestedNonGeneric1.NestedGeneric2<short, bool, decimal>.NestedNonGeneric3));
+        }
+
+        [AssertionMethod]
+        private static void CheckCorrectUnboundTypeName(string expectedName, Type type)
+        {
+            Assert.Equal(expectedName, type.GetCorrectCSharpTypeName(unboundGenericDefinition: true));
         }
 
         [Fact]
         public void GetCorrectCSharpTypeNameSupportsNestedTypesPassedByReference()
         {
-            var byRefNestedType = typeof(Nested).GetMethod(nameof(Nested.TheMethod)).GetParameters().Single().ParameterType;
+            var byRefNestedType = typeof(Nested).GetMethod(nameof(Nested.TheMethod))!.GetParameters().Single().ParameterType;
 
-            CheckCorrectTypeName("BenchmarkDotNet.Tests.ReflectionTests.Nested", byRefNestedType);
+            CheckCorrectTypeName("global::BenchmarkDotNet.Tests.ReflectionTests.Nested", byRefNestedType);
         }
 
         public class Nested
@@ -130,6 +150,34 @@ namespace BenchmarkDotNet.Tests
         }
 
         [Fact]
+        public void GetDisambiguatedDisplayNamesQualifiesCollidingNamesWithNamespace()
+        {
+            var types = new[]
+            {
+                typeof(Foo.Fixture),
+                typeof(Bar.Fixture),
+                typeof(ReflectionTests),
+            };
+
+            var displayNames = types.GetDisambiguatedDisplayNames();
+
+            Assert.Equal("BenchmarkDotNet.Tests.Foo.Fixture", displayNames[0]);
+            Assert.Equal("BenchmarkDotNet.Tests.Bar.Fixture", displayNames[1]);
+            Assert.Equal("ReflectionTests", displayNames[2]);
+        }
+
+        [Fact]
+        public void GetDisambiguatedDisplayNamesLeavesUniqueNamesUnqualified()
+        {
+            var types = new[] { typeof(Foo.Fixture), typeof(ReflectionTests) };
+
+            var displayNames = types.GetDisambiguatedDisplayNames();
+
+            Assert.Equal("Fixture", displayNames[0]);
+            Assert.Equal("ReflectionTests", displayNames[1]);
+        }
+
+        [Fact]
         public void OnlyClosedGenericsWithPublicParameterlessCtorsAreSupported()
         {
             Assert.False(typeof(Generic<>).ContainsRunnableBenchmarks());
@@ -141,28 +189,36 @@ namespace BenchmarkDotNet.Tests
 
         public class Generic<T>
         {
-            [Benchmark] public T Create() => default;
+            [Benchmark] public T Create() => default!;
         }
 
         public class GenericNoPublicCtor<T>
         {
             private GenericNoPublicCtor() { }
 
-            [Benchmark] public T Create() => default;
+            [Benchmark] public T Create() => default!;
         }
 
-        [FactDotNetCoreOnly("the implicit cast operator is available only in .NET Core 2.1+ (See https://github.com/dotnet/corefx/issues/30121 for more)")]
-        public void StringCanBeUsedAsReadOnlySpanOfCharArgument() => Assert.True(typeof(ReadOnlySpan<char>).IsStackOnlyWithImplicitCast("a string"));
+        [FactEnvSpecific("The implicit cast operator is available only in .NET Core 2.1+ (See https://github.com/dotnet/corefx/issues/30121 for more)",
+            EnvRequirement.DotNetCoreOnly)]
+        public void StringCanBeUsedAsReadOnlySpanOfCharArgument() => Assert.True(typeof(ReadOnlySpan<char>).TakesByConversion(typeof(string)));
 
+        // The operator is looked for on both types, so each side is covered: Span declares its own, and the
+        // class below declares one to a ref struct that does not know about it.
         [Fact]
-        public void StackOnlyTypesWithImplicitCastOperatorAreSupportedAsArguments()
+        public void StackOnlyTypesWithACastOperatorAreSupportedAsArguments()
         {
-            Assert.True(typeof(Span<byte>).IsStackOnlyWithImplicitCast(new byte[] { 1, 2, 3 }));
-            Assert.True(typeof(StackOnlyStruct<byte>).IsStackOnlyWithImplicitCast(new WithImplicitCastToStackOnlyStruct<byte>()));
+            Assert.True(typeof(Span<byte>).TakesByConversion(typeof(byte[])));
+            Assert.True(typeof(StackOnlyStruct<byte>).TakesByConversion(typeof(WithImplicitCastToStackOnlyStruct<byte>)));
 
-            Assert.False(typeof(StackOnlyStruct<byte>).IsStackOnlyWithImplicitCast(new WithImplicitCastToStackOnlyStruct<bool>())); // different T
+            // An explicit operator serves as well as an implicit one - the generated code writes the cast itself.
+            Assert.True(typeof(StackOnlyStruct<byte>).TakesByConversion(typeof(WithExplicitCastToStackOnlyStruct<byte>)));
 
-            Assert.False(typeof(List<byte>).IsStackOnlyWithImplicitCast(new byte[] { 1, 3, 3 }));
+            // Matched on exactly these types, so a near miss is a miss: nothing here converts a
+            // WithImplicitCastToStackOnlyStruct<bool> to a StackOnlyStruct<byte>.
+            Assert.False(typeof(StackOnlyStruct<byte>).TakesByConversion(typeof(WithImplicitCastToStackOnlyStruct<bool>)));
+
+            Assert.False(typeof(List<byte>).TakesByConversion(typeof(byte[])));
         }
 
         public ref struct StackOnlyStruct<T>
@@ -172,10 +228,77 @@ namespace BenchmarkDotNet.Tests
 
         public class WithImplicitCastToStackOnlyStruct<T>
         {
-            public T[] Array;
+            public required T[] Array;
 
             public static implicit operator StackOnlyStruct<T>(WithImplicitCastToStackOnlyStruct<T> instance)
                 => new StackOnlyStruct<T> { Span = instance.Array };
         }
+
+        public class WithExplicitCastToStackOnlyStruct<T>
+        {
+            public required T[] Array;
+
+            public static explicit operator StackOnlyStruct<T>(WithExplicitCastToStackOnlyStruct<T> instance)
+                => new StackOnlyStruct<T> { Span = instance.Array };
+        }
+        // The declared-type and cross-kind assertions below all fail without their part of the lookup. The
+        // same-kind most-derived ones cannot: reflection is documented as returning members in no particular
+        // order, but every runtime tested yields the derived member first, so a first match passes here too.
+        // Those are asserted to pin the intent, not because this test can catch their absence.
+        [Fact]
+        public void GetParameterMemberPrefersTheMostDerivedOfAHiddenPair()
+        {
+            const BindingFlags Instance = BindingFlags.Public | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
+            const BindingFlags Static = BindingFlags.Public | BindingFlags.Static | BindingFlags.FlattenHierarchy;
+
+            Assert.Equal(typeof(HidingMembers), typeof(HidingMembers).GetParameterMember("Field", typeof(string), Instance)?.DeclaringType);
+            Assert.Equal(typeof(HidingMembers), typeof(HidingMembers).GetParameterMember("StaticField", typeof(string), Static)?.DeclaringType);
+
+            // A field hiding a property and a property hiding a field: looking either kind up first finds the base
+            // member of that kind, which is not the parameter.
+            Assert.IsAssignableFrom<FieldInfo>(typeof(HidingMembers).GetParameterMember("PropertyHiddenByField", typeof(string), Instance));
+            Assert.IsAssignableFrom<FieldInfo>(typeof(HidingMembers).GetParameterMember("StaticPropertyHiddenByField", typeof(string), Static));
+            Assert.IsAssignableFrom<PropertyInfo>(typeof(HidingMembers).GetParameterMember("FieldHiddenByProperty", typeof(string), Instance));
+
+            // The declared type still selects: only the base declares an int of that name.
+            Assert.Equal(typeof(HiddenMembers), typeof(HidingMembers).GetParameterMember("Typed", typeof(int), Instance)?.DeclaringType);
+            Assert.Equal(typeof(HidingMembers), typeof(HidingMembers).GetParameterMember("Typed", typeof(string), Instance)?.DeclaringType);
+
+            // An indexer takes arguments and is never a parameter member.
+            Assert.Null(typeof(HidingMembers).GetParameterMember("Item", typeof(string), Instance));
+            Assert.Null(typeof(HidingMembers).GetParameterMember("Field", typeof(int), Instance));
+        }
+
+        public class HiddenMembers
+        {
+            public string Field = "";
+            public static string StaticField = "";
+            public int Typed;
+            public string PropertyHiddenByField { get; set; } = "";
+            public static string StaticPropertyHiddenByField { get; set; } = "";
+            public string FieldHiddenByProperty = "";
+        }
+
+        public class HidingMembers : HiddenMembers
+        {
+            public new string Field = "";
+            public static new string StaticField = "";
+            public new string Typed = "";
+            public new string PropertyHiddenByField = "";
+            public static new string StaticPropertyHiddenByField = "";
+            public new string FieldHiddenByProperty { get; set; } = "";
+
+            public string this[int index] => "";
+        }
     }
+}
+
+namespace BenchmarkDotNet.Tests.Foo
+{
+    public class Fixture { }
+}
+
+namespace BenchmarkDotNet.Tests.Bar
+{
+    public class Fixture { }
 }

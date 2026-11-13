@@ -1,21 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Mathematics;
 using Perfolizer.Horology;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.Tests.Analysers
 {
-    public class OutliersAnalyserTests
+    public class OutliersAnalyserTests(ITestOutputHelper output)
     {
-        private readonly ITestOutputHelper output;
-
-        public OutliersAnalyserTests(ITestOutputHelper output) => this.output = output;
-
         [Theory]
         [InlineData(0, 0, "")]
         [InlineData(1, 1, "1 outlier  was  removed")]
@@ -29,7 +20,7 @@ namespace BenchmarkDotNet.Tests.Analysers
         public void SimpleMessageTest(int actualOutliers, int allOutliers, string expectedMessage)
         {
             string actualMessage = OutliersAnalyser.GetMessage(
-                new double[actualOutliers], new double[allOutliers], Array.Empty<double>(), Array.Empty<double>(), TestCultureInfo.Instance);
+                new double[actualOutliers], new double[allOutliers], [], [], TestCultureInfo.Instance);
             Assert.Equal(expectedMessage, actualMessage);
         }
 
@@ -64,9 +55,9 @@ namespace BenchmarkDotNet.Tests.Analysers
             var cultureInfo = TestCultureInfo.Instance;
             string actualMessage = OutliersAnalyser.GetMessage(s.AllOutliers, s.AllOutliers, s.LowerOutliers, s.UpperOutliers, cultureInfo).ToAscii();
             output.WriteLine("Values   : " +
-                             string.Join(", ", values.Take(5).Select(x =>  TimeInterval.FromNanoseconds(x).ToString(cultureInfo, "N2"))) +
+                             string.Join(", ", values.Take(5).Select(x => TimeInterval.FromNanoseconds(x).ToDefaultString("N2"))) +
                              ", ..., " +
-                             string.Join(", ", values.Skip(values.Count - 5).Select(x => TimeInterval.FromNanoseconds(x).ToString(cultureInfo, "N2"))));
+                             string.Join(", ", values.Skip(values.Count - 5).Select(x => TimeInterval.FromNanoseconds(x).ToDefaultString("N2"))));
             output.WriteLine("Actual   : " + actualMessage);
             output.WriteLine("Expected : " + expectedMessage);
             Assert.Equal(expectedMessage, actualMessage);

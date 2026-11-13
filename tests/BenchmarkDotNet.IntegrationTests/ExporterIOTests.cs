@@ -1,18 +1,13 @@
-﻿using System;
-using System.Collections.Immutable;
-using System.IO;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Exporters;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
+using BenchmarkDotNet.Tests;
 using BenchmarkDotNet.Tests.XUnit;
-using BenchmarkDotNet.Validators;
-using Xunit;
-using Xunit.Abstractions;
+using System.Collections.Immutable;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -21,7 +16,7 @@ namespace BenchmarkDotNet.IntegrationTests
         public ExporterIOTests(ITestOutputHelper output) : base(output) { }
 
         [Fact]
-        public void ExporterWritesToFile()
+        public async Task ExporterWritesToFile()
         {
             string resultsDirectoryPath = Path.GetTempPath();
             var exporter = new MockExporter();
@@ -30,7 +25,7 @@ namespace BenchmarkDotNet.IntegrationTests
 
             try
             {
-                exporter.ExportToFiles(mockSummary, NullLogger.Instance);
+                await exporter.ExportAsync(mockSummary, NullLogger.Instance, CancellationToken.None);
 
                 Assert.Equal(1, exporter.ExportCount);
                 Assert.True(File.Exists(filePath));
@@ -42,8 +37,8 @@ namespace BenchmarkDotNet.IntegrationTests
             }
         }
 
-        [FactWindowsOnly("On Unix, it's possible to write to an opened file")]
-        public void ExporterWorksWhenFileIsLocked()
+        [FactEnvSpecific("On Unix, it's possible to write to an opened file", EnvRequirement.WindowsOnly)]
+        public async Task ExporterWorksWhenFileIsLocked()
         {
             string resultsDirectoryPath = Path.GetTempPath();
             var exporter = new MockExporter();
@@ -52,63 +47,44 @@ namespace BenchmarkDotNet.IntegrationTests
 
             try
             {
-                exporter.ExportToFiles(mockSummary, NullLogger.Instance);
+                await exporter.ExportAsync(mockSummary, NullLogger.Instance, CancellationToken.None);
 
                 Assert.Equal(1, exporter.ExportCount);
                 Assert.True(File.Exists(filePath));
                 using (var handle = File.OpenRead(filePath)) // Gets a lock on the target file
                 {
-                    exporter.ExportToFiles(mockSummary, NullLogger.Instance);
+                    await exporter.ExportAsync(mockSummary, NullLogger.Instance, CancellationToken.None);
                     Assert.Equal(2, exporter.ExportCount);
                 }
-                var savedFiles = Directory.EnumerateFiles(Path.GetDirectoryName(filePath), Path.GetFileNameWithoutExtension(filePath) + "*");
+                var savedFiles = Directory.EnumerateFiles(Path.GetDirectoryName(filePath)!, Path.GetFileNameWithoutExtension(filePath) + "*");
                 Assert.Equal(2, savedFiles.Count());
             }
             finally
             {
                 if (File.Exists(filePath))
                     File.Delete(filePath);
-                var otherFiles = Directory.EnumerateFiles(Path.GetDirectoryName(filePath), Path.GetFileNameWithoutExtension(filePath) + "*");
+                var otherFiles = Directory.EnumerateFiles(Path.GetDirectoryName(filePath)!, Path.GetFileNameWithoutExtension(filePath) + "*");
                 foreach (var file in otherFiles)
                     File.Delete(file);
             }
         }
 
-        [Fact]
-        public void ExporterUsesFullyQualifiedTypeNameAsFileName()
+        // the file names are derived from the title alone, see TitleHelperTests for how the runner builds it
+        [Theory]
+        [InlineData(typeof(Generic<int>))] // a summary that reports a single type
+        [InlineData(typeof(ClassA), typeof(ClassB))] // a summary that joins the results of many types
+        public async Task ExporterUsesSummaryTitleAsFileName(params Type[] typesWithBenchmarks)
         {
             string resultsDirectoryPath = Path.GetTempPath();
             var exporter = new MockExporter();
-            var mockSummary = GetMockSummary(resultsDirectoryPath, config: null, typeof(Generic<int>));
-            var expectedFilePath = $"{Path.Combine(mockSummary.ResultsDirectoryPath, "BenchmarkDotNet.IntegrationTests.Generic_Int32_")}-report.txt";
-            string actualFilePath = null;
-
-            try
-            {
-                actualFilePath = exporter.ExportToFiles(mockSummary, NullLogger.Instance).First();
-
-                Assert.Equal(expectedFilePath, actualFilePath);
-            }
-            finally
-            {
-                if (File.Exists(actualFilePath))
-                    File.Delete(actualFilePath);
-            }
-        }
-
-        [Fact]
-        public void ExporterUsesSummaryTitleAsFileNameWhenBenchmarksJoinedToSingleSummary()
-        {
-            string resultsDirectoryPath = Path.GetTempPath();
-            var exporter = new MockExporter();
-            var joinConfig = ManualConfig.CreateEmpty().WithOptions(ConfigOptions.JoinSummary);
-            var mockSummary = GetMockSummary(resultsDirectoryPath, joinConfig, typeof(ClassA), typeof(ClassB));
+            var mockSummary = GetMockSummary(resultsDirectoryPath, config: null, typesWithBenchmarks);
             var expectedFilePath = $"{Path.Combine(mockSummary.ResultsDirectoryPath, mockSummary.Title)}-report.txt";
-            string actualFilePath = null;
+            string? actualFilePath = null;
 
             try
             {
-                actualFilePath = exporter.ExportToFiles(mockSummary, NullLogger.Instance).First();
+                await exporter.ExportAsync(mockSummary, NullLogger.Instance, CancellationToken.None);
+                actualFilePath = exporter.GetArtifactFullName(mockSummary);
 
                 Assert.Equal(expectedFilePath, actualFilePath);
             }
@@ -119,18 +95,18 @@ namespace BenchmarkDotNet.IntegrationTests
             }
         }
 
-        private Summary GetMockSummary(string resultsDirectoryPath, IConfig config, params Type[] typesWithBenchmarks)
+        private Summary GetMockSummary(string resultsDirectoryPath, IConfig? config, params Type[] typesWithBenchmarks)
         {
             return new Summary(
                 title: "bdn-test",
-                reports: typesWithBenchmarks.Length > 0 ? CreateReports(typesWithBenchmarks, config) : ImmutableArray<BenchmarkReport>.Empty,
+                reports: typesWithBenchmarks.Length > 0 ? CreateReports(typesWithBenchmarks, config) : [],
                 hostEnvironmentInfo: Environments.HostEnvironmentInfo.GetCurrent(),
                 resultsDirectoryPath: resultsDirectoryPath,
                 logFilePath: string.Empty,
                 totalTime: System.TimeSpan.Zero,
                 cultureInfo: TestCultureInfo.Instance,
-                validationErrors: ImmutableArray<ValidationError>.Empty,
-                columnHidingRules: ImmutableArray<IColumnHidingRule>.Empty
+                validationErrors: [],
+                columnHidingRules: []
             );
         }
 
@@ -138,16 +114,17 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             public int ExportCount;
 
-            public override void ExportToLog(Summary summary, ILogger logger)
+            public override ValueTask ExportAsync(Summary summary, CancelableStreamWriter writer, CancellationToken cancellationToken)
             {
                 ExportCount++;
+                return new();
             }
         }
 
-        private ImmutableArray<BenchmarkReport> CreateReports(Type[] types, IConfig config = null)
+        private ImmutableArray<BenchmarkReport> CreateReports(Type[] types, IConfig? config = null)
             => CreateBenchmarks(types, config).Select(CreateReport).ToImmutableArray();
 
-        private BenchmarkCase[] CreateBenchmarks(Type[] types, IConfig config)
+        private BenchmarkCase[] CreateBenchmarks(Type[] types, IConfig? config)
         {
             return types.SelectMany(type => BenchmarkConverter.TypeToBenchmarks(type, config).BenchmarksCases).ToArray();
         }
@@ -156,10 +133,9 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             return new BenchmarkReport(success: true,
                                        benchmarkCase: benchmarkCase,
-                                       generateResult: null,
-                                       buildResult: null,
-                                       executeResults: null,
-                                       metrics: null);
+                                       buildResult: null!,
+                                       executeResults: null!,
+                                       metrics: null!);
         }
     }
 

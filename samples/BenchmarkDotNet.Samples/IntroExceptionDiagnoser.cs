@@ -1,5 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
-using System;
+using BenchmarkDotNet.Attributes;
 
 namespace BenchmarkDotNet.Samples
 {
@@ -16,7 +15,10 @@ namespace BenchmarkDotNet.Samples
                     throw new Exception();
                 }
             }
-            catch { }
+            catch
+            {
+                // ignored
+            }
         }
     }
 }

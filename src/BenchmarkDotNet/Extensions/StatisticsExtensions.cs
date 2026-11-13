@@ -1,11 +1,12 @@
-﻿using System;
-using System.Globalization;
-using System.Text;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Mathematics;
 using JetBrains.Annotations;
 using Perfolizer.Horology;
 using Perfolizer.Mathematics.Histograms;
 using Perfolizer.Mathematics.Multimodality;
+using Perfolizer.Metrology;
+using System.Globalization;
+using System.Text;
 
 namespace BenchmarkDotNet.Extensions
 {
@@ -16,11 +17,14 @@ namespace BenchmarkDotNet.Extensions
         public static Func<double, string> CreateNanosecondFormatter(this Statistics s, CultureInfo cultureInfo, string format = "N3")
         {
             var timeUnit = TimeUnit.GetBestTimeUnit(s.Mean);
-            return x => TimeInterval.FromNanoseconds(x).ToString(timeUnit, cultureInfo, format);
+            return x => UnitHelper.Format(
+                TimeInterval.FromNanoseconds(x).ToMeasurement(timeUnit),
+                format, cultureInfo
+            );
         }
 
         [PublicAPI]
-        public static string ToString(this Statistics s, CultureInfo cultureInfo, Func<double, string> formatter, bool calcHistogram = false)
+        public static string ToString(this Statistics? s, CultureInfo cultureInfo, Func<double, string> formatter, bool calcHistogram = false)
         {
             if (s == null)
                 return NullSummaryMessage;
@@ -29,9 +33,9 @@ namespace BenchmarkDotNet.Extensions
 
             var builder = new StringBuilder();
             string errorPercent = (s.StandardError / s.Mean * 100).ToString("0.00", cultureInfo);
-            var ci = s.ConfidenceInterval;
+            var ci = s.PerfolizerConfidenceInterval;
             string ciMarginPercent = (ci.Margin / s.Mean * 100).ToString("0.00", cultureInfo);
-            double mValue = MValueCalculator.Calculate(s.OriginalValues);
+            double mValue = MValueCalculator.Calculate(s.Sample.Values);
 
             builder.Append("Mean = ");
             builder.Append(formatter(s.Mean));
@@ -76,7 +80,9 @@ namespace BenchmarkDotNet.Extensions
             builder.AppendLine();
 
             builder.Append("ConfidenceInterval = ");
-            builder.Append(s.ConfidenceInterval.ToString(formatter));
+            builder.Append("[" + formatter(s.PerfolizerConfidenceInterval.Lower) +
+                           "; " + formatter(s.PerfolizerConfidenceInterval.Upper) +
+                           $"] (CI {s.PerfolizerConfidenceInterval.ConfidenceLevel})");
             builder.Append(listSeparator);
             builder.Append(" Margin = ");
             builder.Append(formatter(ci.Margin));
@@ -97,12 +103,28 @@ namespace BenchmarkDotNet.Extensions
 
             if (calcHistogram)
             {
-                var histogram = HistogramBuilder.Adaptive.Build(s.OriginalValues);
+                var histogram = HistogramBuilder.Adaptive.Build(s.Sample.Values);
+                MakePositive(histogram);
                 builder.AppendLine("-------------------- Histogram --------------------");
                 builder.AppendLine(histogram.ToString(formatter));
                 builder.AppendLine("---------------------------------------------------");
             }
             return builder.ToString().Trim();
+        }
+
+        // At the moment, `HistogramBuilder.Adaptive` may extend bin edges leading to negative lower value for the first bin.
+        // This could be fine in a generic case, but looks confusing for non-negative measurement values.
+        // To avoid confusing summary, we post-process the obtained bins.
+        // This workaround could be removed once a new histogram algorithm is introduced in perfolizer.
+        // See also: https://github.com/dotnet/BenchmarkDotNet/issues/1821
+        private static void MakePositive(Histogram histogram)
+        {
+            for (int i = 0; i < histogram.Bins.Length; i++)
+            {
+                var bin = histogram.Bins[i];
+                if (bin.Lower < 0)
+                    histogram.Bins[i] = new HistogramBin(bin.Values.Min(), bin.Upper, bin.Values);
+            }
         }
     }
 }

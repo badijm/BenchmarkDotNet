@@ -1,10 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Reports;
 using JetBrains.Annotations;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.Tests.Reports
 {
@@ -23,31 +18,31 @@ namespace BenchmarkDotNet.Tests.Reports
             public TestData(double[] values, int ppNull, int pp1, int pp2, int pp3, int pp4)
             {
                 Values = values;
-                Configurations = new List<(int? ParentPrecision, int ExpectedPrecision)>
-                {
+                Configurations =
+                [
                     (null, ppNull),
                     (1, pp1),
                     (2, pp2),
                     (3, pp3),
                     (4, pp4)
-                };
+                ];
             }
         }
 
         private static readonly Dictionary<string, TestData> TestDataItems = new Dictionary<string, TestData>
         {
-            { "Min=1000     ", new TestData(new[] { 1000.0 }, 1, 1, 2, 3, 4) },
-            { "Min= 100     ", new TestData(new[] { 0100.0 }, 1, 1, 2, 3, 4) },
-            { "Min=  10     ", new TestData(new[] { 010.00 }, 2, 2, 2, 3, 4) },
-            { "Min=   1     ", new TestData(new[] { 01.000 }, 3, 2, 3, 3, 4) },
-            { "Min=   0.1   ", new TestData(new[] { 0.1000 }, 4, 2, 3, 4, 4) },
-            { "Min=   0.01  ", new TestData(new[] { 0.0100 }, 4, 2, 3, 4, 4) },
-            { "Min=   0.001 ", new TestData(new[] { 0.0010 }, 4, 2, 3, 4, 4) },
-            { "Min=   0.0001", new TestData(new[] { 0.0001 }, 4, 2, 3, 4, 4) },
-            { "Min=   0.0000", new TestData(new[] { 0.0000 }, 1, 1, 2, 3, 4) },
-            { "Empty", new TestData(Array.Empty<double>(), 1, 1, 2, 3, 4) },
-            { "NaN", new TestData(new[] { double.NaN }, 1, 1, 2, 3, 4) },
-            { "Infinity", new TestData(new[] { double.PositiveInfinity }, 1, 1, 2, 3, 4) }
+            { "Min=1000     ", new TestData([1000.0], 1, 1, 2, 3, 4) },
+            { "Min= 100     ", new TestData([0100.0], 1, 1, 2, 3, 4) },
+            { "Min=  10     ", new TestData([010.00], 2, 2, 2, 3, 4) },
+            { "Min=   1     ", new TestData([01.000], 3, 2, 3, 3, 4) },
+            { "Min=   0.1   ", new TestData([0.1000], 4, 2, 3, 4, 4) },
+            { "Min=   0.01  ", new TestData([0.0100], 4, 2, 3, 4, 4) },
+            { "Min=   0.001 ", new TestData([0.0010], 4, 2, 3, 4, 4) },
+            { "Min=   0.0001", new TestData([0.0001], 4, 2, 3, 4, 4) },
+            { "Min=   0.0000", new TestData([0.0000], 1, 1, 2, 3, 4) },
+            { "Empty", new TestData([], 1, 1, 2, 3, 4) },
+            { "NaN", new TestData([double.NaN], 1, 1, 2, 3, 4) },
+            { "Infinity", new TestData([double.PositiveInfinity], 1, 1, 2, 3, 4) }
         };
 
         [UsedImplicitly]
@@ -71,7 +66,7 @@ namespace BenchmarkDotNet.Tests.Reports
 
                 string strParent = parentPrecision.HasValue ? 1234.5678.ToString("N" + parentPrecision, TestCultureInfo.Instance) : "NA";
                 var strValues = testData.Values.Select(v => v.ToString("N" + actualPrecision, TestCultureInfo.Instance)).ToList();
-                int maxWidth = strValues.Any() ? Math.Max(strValues.Max(s => s.Length), strParent.Length) + 6 : 0;
+                int maxWidth = strValues.Count != 0 ? Math.Max(strValues.Max(s => s.Length), strParent.Length) + 6 : 0;
                 int parentWidth = maxWidth - (actualPrecision - parentPrecision) ?? 0;
 
                 output.WriteLine("******************************");
@@ -109,7 +104,7 @@ namespace BenchmarkDotNet.Tests.Reports
         [InlineData(1, double.PositiveInfinity)]
         public void ClassicTest(int expected, double value)
         {
-            int actual = DisplayPrecisionManager.CalcPrecision(new[] { value });
+            int actual = DisplayPrecisionManager.CalcPrecision([value]);
             Assert.Equal(expected, actual);
         }
     }

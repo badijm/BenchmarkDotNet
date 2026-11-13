@@ -1,11 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Loggers;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Running
 {
@@ -14,6 +12,32 @@ namespace BenchmarkDotNet.Running
         public static (bool allTypesValid, IReadOnlyList<Type> runnable) GetTypesWithRunnableBenchmarks(IEnumerable<Type> types, IEnumerable<Assembly> assemblies, ILogger logger)
         {
             var validRunnableTypes = new List<Type>();
+
+            bool hasRunnableTypeBenchmarks = types.Any(type => type.ContainsRunnableBenchmarks());
+            bool hasRunnableAssemblyBenchmarks = assemblies.Any(assembly => GenericBenchmarksBuilder.GetRunnableBenchmarks(assembly.GetRunnableBenchmarks()).Length > 0);
+
+            if (!hasRunnableTypeBenchmarks && !hasRunnableAssemblyBenchmarks)
+            {
+                if (types.Any())
+                {
+                    foreach (var type in types)
+                    {
+                        logger.WriteLineError($"No [Benchmark] attribute found on '{type.Name}' benchmark case.");
+                    }
+                }
+                else if (assemblies.Any())
+                {
+                    foreach (var assembly in assemblies)
+                    {
+                        logger.WriteLineError($"No [Benchmark] attribute found on '{assembly.GetName().Name}' assembly.");
+                    }
+                }
+                else
+                {
+                    logger.WriteLineError("No benchmarks were found.");
+                }
+                return (false, Array.Empty<Type>());
+            }
 
             foreach (var type in types)
             {
@@ -38,9 +62,24 @@ namespace BenchmarkDotNet.Running
         }
 
         public static BenchmarkRunInfo[] Filter(IConfig effectiveConfig, IEnumerable<Type> types)
-            => types
-                .Select(type => BenchmarkConverter.TypeToBenchmarks(type, effectiveConfig))
-                .Where(info => info.BenchmarksCases.Any())
-                .ToArray();
+        {
+            using var context = BenchmarkSynchronizationContext.CreateAndSetCurrent();
+            return context.ExecuteUntilComplete(FilterAsync(effectiveConfig, types, CancellationToken.None));
+        }
+
+        public static async ValueTask<BenchmarkRunInfo[]> FilterAsync(IConfig effectiveConfig, IEnumerable<Type> types, CancellationToken cancellationToken)
+        {
+            var result = new List<BenchmarkRunInfo>();
+            foreach (var type in types)
+            {
+                var info = await BenchmarkConverter.TypeToBenchmarksAsync(type, effectiveConfig, cancellationToken).ConfigureAwait();
+
+                // A type left with no cases is kept where discovery refused one of its declarations: dropping it
+                // would take the reason with it, and the run would tell the user their filter matched nothing.
+                if (info.BenchmarksCases.Any() || info.DeclarationErrors.Length > 0)
+                    result.Add(info);
+            }
+            return result.ToArray();
+        }
     }
 }

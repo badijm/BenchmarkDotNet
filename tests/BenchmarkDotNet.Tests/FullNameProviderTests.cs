@@ -1,12 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.IO;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Running;
-using Xunit;
+using System.ComponentModel;
 
 namespace BenchmarkDotNet.Tests
 {
@@ -68,7 +63,7 @@ namespace BenchmarkDotNet.Tests
 
         [Fact]
         public void UnicodeIsSupported()
-            => AssertBenchmarkName<WithCrazyUnicodeCharacters>("BenchmarkDotNet.Tests.WithCrazyUnicodeCharacters.Method(arg1: \"" + "FOO" + "\", arg2: \""+ "\u03C3" + "\", arg3: \"" + "x\u0305" + "\")");
+            => AssertBenchmarkName<WithCrazyUnicodeCharacters>("BenchmarkDotNet.Tests.WithCrazyUnicodeCharacters.Method(arg1: \"" + "FOO" + "\", arg2: \"" + "\u03C3" + "\", arg3: \"" + "x\u0305" + "\")");
 
         [Fact]
         public void TabsAndEnters()
@@ -165,9 +160,9 @@ namespace BenchmarkDotNet.Tests
         [ArgumentsSource(nameof(Date))]
         public void Method(DateTime arg) { }
 
-        public IEnumerable<object[]> Date()
+        public IEnumerable<DateTime> Date()
         {
-            yield return new object[] { DateTime.MaxValue };
+            yield return DateTime.MaxValue;
         }
     }
 
@@ -177,9 +172,9 @@ namespace BenchmarkDotNet.Tests
         [ArgumentsSource(nameof(Guid))]
         public void Method(Guid arg) { }
 
-        public IEnumerable<object[]> Guid()
+        public IEnumerable<Guid> Guid()
         {
-            yield return new object[] { System.Guid.Empty };
+            yield return System.Guid.Empty;
         }
     }
 
@@ -198,7 +193,7 @@ namespace BenchmarkDotNet.Tests
     public class SimpleGeneric<T>
     {
         [Benchmark]
-        public T Method() => default(T);
+        public T Method() => default!;
     }
 
     public class WithCrazyUnicodeCharacters
@@ -226,9 +221,9 @@ namespace BenchmarkDotNet.Tests
         [ArgumentsSource(nameof(Data))]
         public void Method(int[] array) { }
 
-        public IEnumerable<object[]> Data()
+        public IEnumerable<int[]> Data()
         {
-            yield return new object[] { Enumerable.Range(0, 100).ToArray() };
+            yield return Enumerable.Range(0, 100).ToArray();
         }
     }
 

@@ -1,4 +1,3 @@
-﻿using System.Collections.Generic;
 using BenchmarkDotNet.Reports;
 
 namespace BenchmarkDotNet.Columns

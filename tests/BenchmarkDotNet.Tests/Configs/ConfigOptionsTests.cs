@@ -1,5 +1,4 @@
-﻿using BenchmarkDotNet.Configs;
-using Xunit;
+using BenchmarkDotNet.Configs;
 
 namespace BenchmarkDotNet.Tests.Configs
 {

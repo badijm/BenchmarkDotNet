@@ -1,14 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace BenchmarkDotNet.Extensions
 {
     // Renamed to "StringAndTextExtensions", so it doesn't clash with "StringExtensions" in BenchmarkDotNet.Portability
-    public static class StringAndTextExtensions
+    internal static class StringAndTextExtensions
     {
         private static readonly Lazy<Dictionary<string, string>> InvalidFileNameCharactersMappings
             = new Lazy<Dictionary<string, string>>(BuildInvalidPathCharactersMappings);
@@ -82,11 +79,6 @@ namespace BenchmarkDotNet.Extensions
         /// <param name="s">string to encode</param>
         internal static string HtmlEncode(this string s)
         {
-            if (s == null)
-            {
-                return null;
-            }
-
             var sb = new StringBuilder(s.Length);
 
             foreach (char c in s)
@@ -130,15 +122,17 @@ namespace BenchmarkDotNet.Extensions
         /// <param name="stringBuilder">The string builder that will hold the arguments</param>
         /// <param name="argument">The argument to append to this string builder</param>
         /// <returns>The string builder with the arguments added</returns>
-        internal static StringBuilder AppendArgument(this StringBuilder stringBuilder, string argument)
+        internal static StringBuilder AppendArgument(this StringBuilder stringBuilder, string? argument)
         {
-            if (string.IsNullOrWhiteSpace(argument))
+            if (argument.IsBlank())
             {
                 return stringBuilder;
             }
-            argument = " " + argument.Trim();
-            stringBuilder.Append(argument);
 
+            if (stringBuilder.Length != 0)
+                stringBuilder.Append(' ');
+
+            stringBuilder.Append(argument.Trim());
             return stringBuilder;
         }
 
@@ -148,7 +142,19 @@ namespace BenchmarkDotNet.Extensions
         /// <param name="stringBuilder">The string builder that will hold the arguments</param>
         /// <param name="argument">The argument to append to this string builder</param>
         /// <returns>The string builder with the arguments added</returns>
-        internal static StringBuilder AppendArgument(this StringBuilder stringBuilder, object argument)
-            => argument == null ? stringBuilder : AppendArgument(stringBuilder, argument.ToString());
+        internal static StringBuilder AppendArgument(this StringBuilder stringBuilder, object? argument)
+            => argument == null ? stringBuilder : AppendArgument(stringBuilder, argument.ToString()!);
+
+        public static bool IsBlank([NotNullWhen(false)] this string? value) => string.IsNullOrWhiteSpace(value);
+        public static bool IsNotBlank([NotNullWhen(true)] this string? value) => !value.IsBlank();
+
+        /// <summary>
+        /// Helper method to ensure not null value.
+        /// It's expected to be used for public API parameters handling.
+        /// </summary>
+        public static string EnsureNotNull(this string? value)
+        {
+            return value ?? "";
+        }
     }
 }

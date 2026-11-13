@@ -1,8 +1,6 @@
-using System;
-using System.Linq;
-using System.Text.RegularExpressions;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Running;
+using System.Text.RegularExpressions;
 
 namespace BenchmarkDotNet.Filters
 {

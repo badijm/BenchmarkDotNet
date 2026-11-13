@@ -1,14 +1,9 @@
-﻿using System;
-using System.Linq;
-using System.Threading;
-using Xunit;
-using BenchmarkDotNet.Reports;
-using System.Collections.Generic;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Exporters;
-using Xunit.Abstractions;
+using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Reports;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -19,7 +14,7 @@ namespace BenchmarkDotNet.IntegrationTests
         [Fact]
         public void ColumnsWithBaselineGetsRatio()
         {
-            // This is the common way to run benchmarks, it should wire up the BenchmarkBaselineDeltaResultExtender for us
+            // This is the common way to run benchmarks,
             // BenchmarkTestExecutor.CanExecute(..) calls BenchmarkRunner.Run(..) under the hood
             var summary = CanExecute<BaselineRatioColumnBenchmarks>();
 
@@ -68,9 +63,7 @@ namespace BenchmarkDotNet.IntegrationTests
 
             CanExecute<BaselineRatioResultExtenderNoBaseline>(config);
 
-            // Ensure that when the TestBenchmarkExporter() was run, it wasn't passed an instance of "BenchmarkBaselineDeltaResultExtender"
-            Assert.False(testExporter.ExportCalled);
-            Assert.True(testExporter.ExportToFileCalled);
+            Assert.True(testExporter.ExportCalled);
         }
 
         public class BaselineRatioResultExtenderNoBaseline
@@ -86,18 +79,13 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             public bool ExportCalled { get; private set; }
 
-            public bool ExportToFileCalled { get; private set; }
-
-            public string Description => "For Testing Only!";
 
             public string Name => "TestBenchmarkExporter";
 
-            public void ExportToLog(Summary summary, BenchmarkDotNet.Loggers.ILogger logger) => ExportCalled = true;
-
-            public IEnumerable<string> ExportToFiles(Summary summary, BenchmarkDotNet.Loggers.ILogger consoleLogger)
+            public ValueTask ExportAsync(Summary summary, ILogger logger, CancellationToken cancellationToken)
             {
-                ExportToFileCalled = true;
-                return Enumerable.Empty<string>();
+                ExportCalled = true;
+                return new();
             }
         }
     }
@@ -115,6 +103,7 @@ namespace BenchmarkDotNet.IntegrationTests
             Assert.True(summary.HasCriticalValidationErrors);
         }
 
+#pragma warning disable BDN1107
         public class BaselineRatioResultExtenderError
         {
             [Benchmark(Baseline = true)]
@@ -123,6 +112,7 @@ namespace BenchmarkDotNet.IntegrationTests
             [Benchmark(Baseline = true)]
             public void BenchmarkFast() => Thread.Sleep(5);
         }
+#pragma warning restore BDN1107
     }
 
     public class BaselineRatioColumnWithLongParamsTest : BenchmarkTestExecutor
@@ -142,7 +132,7 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             // Long different parameters with equal length but different values
             [Params("12345ThisIsALongParameter54321", "12345ThisIsARongParameter54321")]
-            public string LongStringParamProperty { get; set; }
+            public required string LongStringParamProperty { get; set; }
 
             [Benchmark(Baseline = true)]
             public void BenchmarkSlow() => Thread.Sleep(20);

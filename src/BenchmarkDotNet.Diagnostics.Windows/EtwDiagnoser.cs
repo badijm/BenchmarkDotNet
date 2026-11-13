@@ -1,32 +1,29 @@
-﻿using System;
-using System.Collections.Concurrent;
-using BenchmarkDotNet.Parameters;
-using BenchmarkDotNet.Running;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Exporters;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Parameters;
+using BenchmarkDotNet.Running;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
+using System.Collections.Concurrent;
 
 namespace BenchmarkDotNet.Diagnostics.Windows
 {
-    public abstract class EtwDiagnoser<TStats> where TStats : new()
+    public abstract class EtwDiagnoser<TStats> : DisposeAtProcessTermination where TStats : new()
     {
         internal readonly LogCapture Logger = new LogCapture();
-        protected readonly Dictionary<BenchmarkCase, int> BenchmarkToProcess = new Dictionary<BenchmarkCase, int>();
-        protected readonly ConcurrentDictionary<int, TStats> StatsPerProcess = new ConcurrentDictionary<int, TStats>();
+        protected readonly Dictionary<BenchmarkCase, int> BenchmarkToProcess = [];
+        protected readonly ConcurrentDictionary<int, TStats> StatsPerProcess = [];
 
         public virtual RunMode GetRunMode(BenchmarkCase benchmarkCase) => RunMode.ExtraRun;
 
-        public virtual IEnumerable<IExporter> Exporters => Array.Empty<IExporter>();
-        public virtual IEnumerable<IAnalyser> Analysers => Array.Empty<IAnalyser>();
+        public virtual IEnumerable<IExporter> Exporters => [];
+        public virtual IEnumerable<IAnalyser> Analysers => [];
 
-        protected TraceEventSession Session { get; private set; }
+        protected TraceEventSession Session { get; private set; } = default!;
 
         protected abstract ulong EventType { get; }
 
@@ -36,13 +33,8 @@ namespace BenchmarkDotNet.Diagnostics.Windows
         {
             Clear();
 
-            BenchmarkToProcess.Add(parameters.BenchmarkCase, parameters.Process.Id);
-            StatsPerProcess.TryAdd(parameters.Process.Id, GetInitializedStats(parameters));
-
-            // Important: Must wire-up clean-up events prior to acquiring IDisposable instance (Session property)
-            // This is in effect the inverted sequence of actions in the Stop() method.
-            Console.CancelKeyPress += OnConsoleCancelKeyPress;
-            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+            BenchmarkToProcess.Add(parameters.BenchmarkCase, parameters.ProcessId);
+            StatsPerProcess.TryAdd(parameters.ProcessId, GetInitializedStats(parameters));
 
             Session = CreateSession(parameters.BenchmarkCase);
 
@@ -55,7 +47,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
             // (or processes) we should be monitoring. Communication between the benchmark thread
             // and the ETW collection thread is through the statsPerProcess concurrent dictionary
             // and through the TraceEventSession class, which is thread-safe.
-            var task = Task.Factory.StartNew((Action)(() => Session.Source.Process()), TaskCreationOptions.LongRunning);
+            var task = Task.Factory.StartNew((Action) (() => Session.Source.Process()), TaskCreationOptions.LongRunning);
 
             // wait until the processing has started, block by then so we don't loose any
             // information (very important for jit-related things)
@@ -80,11 +72,13 @@ namespace BenchmarkDotNet.Diagnostics.Windows
         protected void Stop()
         {
             WaitForDelayedEvents();
+            Dispose();
+        }
 
-            Session.Dispose();
-
-            Console.CancelKeyPress -= OnConsoleCancelKeyPress;
-            AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
+        protected override void Dispose(bool exiting)
+        {
+            Session?.Dispose();
+            base.Dispose(exiting);
         }
 
         private void Clear()
@@ -93,11 +87,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
             StatsPerProcess.Clear();
         }
 
-        private void OnConsoleCancelKeyPress(object sender, ConsoleCancelEventArgs e) => Session?.Dispose();
-
-        private void OnProcessExit(object sender, EventArgs e) => Session?.Dispose();
-
-        private static string GetSessionName(string prefix, BenchmarkCase benchmarkCase, ParameterInstances parameters = null)
+        private static string GetSessionName(string prefix, BenchmarkCase benchmarkCase, ParameterInstances? parameters = null)
         {
             if (parameters != null && parameters.Items.Count > 0)
                 return $"{prefix}-{benchmarkCase.FolderInfo}-{parameters.FolderInfo}";

@@ -1,5 +1,3 @@
-using System;
-using System.Collections.Generic;
 using System.Reflection;
 
 namespace BenchmarkDotNet.Loggers
@@ -13,10 +11,10 @@ namespace BenchmarkDotNet.Loggers
 
         private readonly IReadOnlyDictionary<LogKind, string> colorScheme;
 
-        public static readonly Lazy<LinqPadLogger> lazyInstance = new Lazy<LinqPadLogger>(() =>
+        public static readonly Lazy<LinqPadLogger?> lazyInstance = new(() =>
         {
             // Detect if being run from LINQPad; see https://github.com/dotnet/BenchmarkDotNet/issues/445#issuecomment-300723741
-            MethodInfo withStyle = null;
+            MethodInfo? withStyle = null;
             if (AppDomain.CurrentDomain.FriendlyName.StartsWith("LINQPad", StringComparison.OrdinalIgnoreCase))
             {
                 try
@@ -34,7 +32,7 @@ namespace BenchmarkDotNet.Loggers
 
             if (withStyle != null)
             {
-                var isDarkTheme = (bool) (withStyle.DeclaringType.GetProperty("IsDarkThemeEnabled", BindingFlags.Static | BindingFlags.Public)?.GetValue(null) ?? false);
+                var isDarkTheme = (bool) (withStyle.DeclaringType!.GetProperty("IsDarkThemeEnabled", BindingFlags.Static | BindingFlags.Public)?.GetValue(null) ?? false);
                 var colorScheme = isDarkTheme ? CreateDarkScheme() : CreateLightScheme();
                 return new LinqPadLogger(withStyle, colorScheme);
             }
@@ -44,7 +42,7 @@ namespace BenchmarkDotNet.Loggers
 
         public static bool IsAvailable => Instance != null;
 
-        public static ILogger Instance => lazyInstance.Value;
+        public static ILogger? Instance => lazyInstance.Value;
 
         private LinqPadLogger(MethodInfo withStyle, IReadOnlyDictionary<LogKind, string> colorScheme)
         {
@@ -66,7 +64,7 @@ namespace BenchmarkDotNet.Loggers
             write(WithStyle(text, "color:" + GetColor(logKind) + ";font-family:Consolas,'Lucida Console','Courier New',monospace"));
 
         private object WithStyle(object data, string htmlStyle) =>
-            withStyle.Invoke(null, new[] { data, htmlStyle });
+            withStyle.Invoke(null, [data, htmlStyle])!;
 
         private string GetColor(LogKind logKind) =>
             colorScheme.TryGetValue(logKind, out var color) ? color : DefaultColor;
@@ -82,6 +80,7 @@ namespace BenchmarkDotNet.Loggers
                 { LogKind.Statistic, "#00FFFF" },
                 { LogKind.Info, "#808000" },
                 { LogKind.Error, "#FF0000" },
+                { LogKind.Warning, "#FFFF00" },
                 { LogKind.Hint, "#008080" }
             };
 
@@ -95,6 +94,7 @@ namespace BenchmarkDotNet.Loggers
                 { LogKind.Statistic, "#008080" },
                 { LogKind.Info, "#808000" },
                 { LogKind.Error, "#FF0000" },
+                { LogKind.Warning, "#FFFF00" },
                 { LogKind.Hint, "#008080" }
             };
     }

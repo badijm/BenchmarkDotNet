@@ -1,9 +1,8 @@
-﻿using System.Globalization;
-using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Reports;
 using Perfolizer.Horology;
-using Xunit;
+using Perfolizer.Metrology;
+using System.Globalization;
 
 namespace BenchmarkDotNet.Tests
 {
@@ -24,7 +23,7 @@ namespace BenchmarkDotNet.Tests
 
             var config = ManualConfig.CreateEmpty().WithSummaryStyle(summaryStyle);
 
-            Assert.Equal(CultureInfo.InvariantCulture, config.SummaryStyle.CultureInfo);
+            Assert.Equal(CultureInfo.InvariantCulture, config.SummaryStyle!.CultureInfo);
             Assert.True(config.SummaryStyle.PrintUnitsInHeader);
             Assert.False(config.SummaryStyle.PrintUnitsInContent);
             Assert.True(config.SummaryStyle.PrintZeroValuesInContent);

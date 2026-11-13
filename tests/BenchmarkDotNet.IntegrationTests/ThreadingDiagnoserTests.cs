@@ -9,18 +9,15 @@ using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Loggers;
 using BenchmarkDotNet.Toolchains;
+using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using BenchmarkDotNet.Toolchains.NativeAot;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using BenchmarkDotNet.Environments;
-using BenchmarkDotNet.Portability;
-using Xunit;
-using Xunit.Abstractions;
+using BenchmarkDotNet.Detectors;
+using BenchmarkDotNet.IntegrationTests.Xunit;
+using BenchmarkDotNet.Tests.XUnit;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
+    [Collection(Constants.FlakyTests)]
     public class ThreadingDiagnoserTests
     {
         private readonly ITestOutputHelper output;
@@ -29,28 +26,42 @@ namespace BenchmarkDotNet.IntegrationTests
 
         public static IEnumerable<object[]> GetToolchains()
         {
+            yield return new object[] { InProcessEmitToolchain.Default };
+
+            if (ContinuousIntegration.IsGitHubDraftPR())
+                yield break;
+
             yield return new object[] { Job.Default.GetToolchain() };
 
             if (!ContinuousIntegration.IsGitHubActionsOnWindows() // no native dependencies
-                && !RuntimeInformation.IsMacOS() // currently not supported
-                && !ContinuousIntegration.IsAppVeyorOnWindows()) // timeouts
+                && !OsDetector.IsMacOS()) // currently not supported
             {
-                yield return new object[]{ NativeAotToolchain.CreateBuilder()
-                    .UseNuGet("7.0.0", "https://api.nuget.org/v3/index.json")
-                    .ToToolchain() };
+                yield return new object[] { CsProjNativeAotToolchain.Net10_0 };
             }
-            // TODO: Support InProcessEmitToolchain.Instance
-            // yield return new object[] { InProcessEmitToolchain.Instance };
         }
 
-        [Theory, MemberData(nameof(GetToolchains))]
+        [TheoryEnvSpecific(EnvRequirement.NonGitHubDraftPR)]
+        [MemberData(nameof(GetToolchains), DisableDiscoveryEnumeration = true)]
         public void CompletedWorkItemCountIsAccurate(IToolchain toolchain)
         {
             var config = CreateConfig(toolchain);
 
             var summary = BenchmarkRunner.Run<CompletedWorkItemCount>(config);
+            try
+            {
+                summary.CheckPlatformLinkerIssues();
+            }
+            catch (MisconfiguredEnvironmentException e)
+            {
+                if (ContinuousIntegration.IsLocalRun())
+                {
+                    output.WriteLine(e.SkipMessage);
+                    return;
+                }
+                throw;
+            }
 
-            AssertStats(summary, new Dictionary<string, (string metricName, double expectedValue)>
+            AssertStats(summary, toolchain, new Dictionary<string, (string metricName, double expectedValue)>
             {
                 { nameof(CompletedWorkItemCount.DoNothing), ("CompletedWorkItemCount", 0.0) },
                 { nameof(CompletedWorkItemCount.CompleteOneWorkItem), ("CompletedWorkItemCount", 1.0) }
@@ -63,7 +74,7 @@ namespace BenchmarkDotNet.IntegrationTests
             public void CompleteOneWorkItem()
             {
                 ManualResetEvent done = new ManualResetEvent(false);
-                ThreadPool.QueueUserWorkItem(m => (m as ManualResetEvent).Set(), done);
+                ThreadPool.QueueUserWorkItem(m => (m as ManualResetEvent)!.Set(), done);
                 done.WaitOne();
             }
 
@@ -71,14 +82,28 @@ namespace BenchmarkDotNet.IntegrationTests
             public void DoNothing() { }
         }
 
-        [Theory, MemberData(nameof(GetToolchains))]
+        [TheoryEnvSpecific(EnvRequirement.NonGitHubDraftPR)]
+        [MemberData(nameof(GetToolchains), DisableDiscoveryEnumeration = true)]
         public void LockContentionCountIsAccurate(IToolchain toolchain)
         {
             var config = CreateConfig(toolchain);
 
             var summary = BenchmarkRunner.Run<LockContentionCount>(config);
+            try
+            {
+                summary.CheckPlatformLinkerIssues();
+            }
+            catch (MisconfiguredEnvironmentException e)
+            {
+                if (ContinuousIntegration.IsLocalRun())
+                {
+                    output.WriteLine(e.SkipMessage);
+                    return;
+                }
+                throw;
+            }
 
-            AssertStats(summary, new Dictionary<string, (string metricName, double expectedValue)>
+            AssertStats(summary, toolchain, new Dictionary<string, (string metricName, double expectedValue)>
             {
                 { nameof(LockContentionCount.DoNothing), ("LockContentionCount", 0.0) },
                 { nameof(LockContentionCount.RunIntoLockContention), ("LockContentionCount", 1.0) }
@@ -89,8 +114,8 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             private readonly object guard = new object();
 
-            private ManualResetEvent lockTaken;
-            private ManualResetEvent failedToAcquire;
+            private ManualResetEvent lockTaken = default!;
+            private ManualResetEvent failedToAcquire = default!;
 
             [Benchmark]
             public void DoNothing() { }
@@ -149,7 +174,7 @@ namespace BenchmarkDotNet.IntegrationTests
                     ? ConsoleLogger.Default
                     : new OutputLogger(output)); // we can't use OutputLogger for the InProcess toolchains because it allocates memory on the same thread
 
-        private void AssertStats(Summary summary, Dictionary<string, (string metricName, double expectedValue)> assertions)
+        private void AssertStats(Summary summary, IToolchain toolchain, Dictionary<string, (string metricName, double expectedValue)> assertions)
         {
             foreach (var assertion in assertions)
             {
@@ -159,7 +184,13 @@ namespace BenchmarkDotNet.IntegrationTests
 
                 // precision is set to 2 because CoreCLR might schedule some work item on it's own and hence affect the results..
                 // precision = 3 is not enough (e.g., sometimes the actual value may be equal 1.0009765625 while the expected value is 1.0)
-                Assert.Equal(assertion.Value.expectedValue, metric.Value.Value, precision: 2);
+                int precision = 2;
+
+                // On macos, there are some additional background operations (https://github.com/dotnet/BenchmarkDotNet/issues/3098)
+                if (OsDetector.IsMacOS())
+                    precision = 1;
+
+                Assert.Equal(assertion.Value.expectedValue, metric.Value.Value, precision);
             }
         }
     }

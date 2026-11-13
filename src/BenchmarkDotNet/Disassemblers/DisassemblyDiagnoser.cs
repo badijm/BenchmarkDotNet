@@ -1,41 +1,51 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Analysers;
+using BenchmarkDotNet.Code;
 using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Disassemblers;
 using BenchmarkDotNet.Disassemblers.Exporters;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Helpers;
-using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
+using BenchmarkDotNet.Serialization;
 using BenchmarkDotNet.Toolchains.InProcess.NoEmit;
 using BenchmarkDotNet.Validators;
+using JetBrains.Annotations;
+using Perfolizer.Metrology;
+using System.ComponentModel;
+using System.Diagnostics;
 
 namespace BenchmarkDotNet.Diagnosers
 {
-    public class DisassemblyDiagnoser : IDiagnoser
+    public class DisassemblyDiagnoser : IInProcessDiagnoser
     {
-        private static readonly Lazy<string> ptrace_scope = new Lazy<string>(() => ProcessHelper.RunAndReadOutput("cat", "/proc/sys/kernel/yama/ptrace_scope").Trim());
+        private static readonly Lazy<string> ptrace_scope = new(() => ProcessHelper.RunAndReadOutput("cat", "/proc/sys/kernel/yama/ptrace_scope")?.Trim() ?? "");
 
-        private readonly WindowsDisassembler windowsDifferentArchitectureDisassembler;
-        private readonly SameArchitectureDisassembler sameArchitectureDisassembler;
-        private readonly MonoDisassembler monoDisassembler;
-        private readonly Dictionary<BenchmarkCase, DisassemblyResult> results;
+        private ClrMdDisassembler? _clrMdDisassembler;
+
+        // Lazy create to avoid exceptions at Disassembler ctor
+        private ClrMdDisassembler ClrMdDisassembler => _clrMdDisassembler ??= GetClrMdDisassembler();
+
+        internal static ClrMdDisassembler GetClrMdDisassembler() =>
+            RuntimeInformation.GetCurrentPlatform() switch
+            {
+                Platform.X86 or Platform.X64 => new IntelDisassembler(),
+                Platform.Arm64 => new Arm64Disassembler(),
+                var platform => throw new NotSupportedException($"{platform} is not supported")
+            };
+
+        private readonly MonoDisassembler monoDisassembler = new();
+        private readonly Dictionary<BenchmarkCase, DisassemblyResult> results = [];
 
         public DisassemblyDiagnoser(DisassemblyDiagnoserConfig config)
         {
             Config = config;
-            windowsDifferentArchitectureDisassembler = new WindowsDisassembler(config);
-            sameArchitectureDisassembler = new SameArchitectureDisassembler(config);
-            monoDisassembler = new MonoDisassembler(config);
 
-            results = new Dictionary<BenchmarkCase, DisassemblyResult>();
             Exporters = GetExporters(results, config);
         }
 
@@ -43,11 +53,11 @@ namespace BenchmarkDotNet.Diagnosers
 
         public IReadOnlyDictionary<BenchmarkCase, DisassemblyResult> Results => results;
 
-        public IEnumerable<string> Ids => new[] { nameof(DisassemblyDiagnoser) };
+        public IEnumerable<string> Ids => [nameof(DisassemblyDiagnoser)];
 
         public IEnumerable<IExporter> Exporters { get; }
 
-        public IEnumerable<IAnalyser> Analysers => new IAnalyser[] { new DisassemblyAnalyzer(results) };
+        public IEnumerable<IAnalyser> Analysers => [new DisassemblyAnalyzer(results)];
 
         public IEnumerable<Metric> ProcessResults(DiagnoserResults diagnoserResults)
         {
@@ -65,95 +75,123 @@ namespace BenchmarkDotNet.Diagnosers
             return RunMode.None;
         }
 
-        public void Handle(HostSignal signal, DiagnoserActionParameters parameters)
+        private ClrMdArgs BuildClrMdArgs(BenchmarkCase benchmarkCase, string typeName, int processId)
+            => new(
+                processId: processId,
+                typeName: typeName,
+                methodName: RunnableConstants.ForDisassemblyDiagnoserMethodName,
+                printSource: Config.PrintSource,
+                maxDepth: Config.MaxDepth,
+                filters: Config.Filters,
+                syntax: Config.Syntax.ToString(),
+                runtimeVersion: benchmarkCase.GetRuntime().Version!
+            );
+
+        public async ValueTask HandleAsync(HostSignal signal, DiagnoserActionParameters parameters, CancellationToken cancellationToken)
         {
             var benchmark = parameters.BenchmarkCase;
+            bool isInProcess = parameters.BenchmarkCase.Job.Infrastructure.TryGetToolchain(out var toolchain) && toolchain.IsInProcess;
 
             switch (signal)
             {
-                case HostSignal.AfterAll when ShouldUseSameArchitectureDisassembler(benchmark, parameters):
-                    results.Add(benchmark, sameArchitectureDisassembler.Disassemble(parameters));
-                    break;
-                case HostSignal.AfterAll when RuntimeInformation.IsWindows() && !ShouldUseMonoDisassembler(benchmark):
-                    results.Add(benchmark, windowsDifferentArchitectureDisassembler.Disassemble(parameters));
+                case HostSignal.AfterAll when (Config.RunInHost || isInProcess) && ShouldUseClrMdDisassembler(benchmark):
+                    await ThreadPoolHelper.Switch(cancellationToken);
+
+                    var clrMdArgs = BuildClrMdArgs(parameters.BenchmarkCase, $"{RunnableConstants.EmittedTypePrefix}{parameters.BenchmarkId.Value}", parameters.ProcessId);
+                    if (parameters.InProcessRunnableType is { } runnableType)
+                    {
+                        clrMdArgs.TypeName = runnableType.FullName!;
+                        clrMdArgs.TypeHandle = runnableType.TypeHandle.Value;
+                    }
+                    results.Add(benchmark, ClrMdDisassembler.AttachAndDisassemble(clrMdArgs));
                     break;
                 case HostSignal.SeparateLogic when ShouldUseMonoDisassembler(benchmark):
-                    results.Add(benchmark, monoDisassembler.Disassemble(benchmark, benchmark.Job.Environment.Runtime as MonoRuntime));
+                    var result = await monoDisassembler.Disassemble(benchmark, cancellationToken).ConfigureAwait(false);
+                    results.Add(benchmark, result);
                     break;
             }
         }
 
         public void DisplayResults(ILogger logger)
             => logger.WriteInfo(
-                results.Any()
+                results.Count > 0
                     ? "Disassembled benchmarks got exported to \".\\BenchmarkDotNet.Artifacts\\results\\*asm.md\""
                     : "No benchmarks were disassembled");
 
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters)
+        public async IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters)
         {
             var currentPlatform = RuntimeInformation.GetCurrentPlatform();
             if (!(currentPlatform is Platform.X64 or Platform.X86 or Platform.Arm64))
             {
-                yield return new ValidationError(true, $"{currentPlatform} is not supported");
+                yield return new ValidationError(true, $"{nameof(DisassemblyDiagnoser)} does not support {currentPlatform}");
+                yield break;
+            }
+
+            if (Config.RunInHost && OsDetector.IsMacOS())
+            {
+                yield return new ValidationError(true, "Disassembling in the host process is not supported on MacOS");
                 yield break;
             }
 
             foreach (var benchmark in validationParameters.Benchmarks)
             {
+                var runtime = benchmark.GetRuntime();
                 if (benchmark.Job.Infrastructure.TryGetToolchain(out var toolchain) && toolchain is InProcessNoEmitToolchain)
                 {
-                    yield return new ValidationError(true, "InProcessToolchain has no DisassemblyDiagnoser support", benchmark);
+                    yield return new ValidationError(true, $"{nameof(DisassemblyDiagnoser)} does not support {nameof(InProcessNoEmitToolchain)}", benchmark);
                 }
-                else if (benchmark.Job.IsNativeAOT())
+                else if (runtime is not (CoreRuntime or R2RRuntime or ClrRuntime or LegacyMonoRuntime))
                 {
-                    yield return new ValidationError(true, "Currently NativeAOT has no DisassemblyDiagnoser support", benchmark);
+                    yield return new ValidationError(true, $"{nameof(DisassemblyDiagnoser)}  does not support {runtime}", benchmark);
                 }
-
-                if (RuntimeInformation.IsLinux() && ShouldUseClrMdDisassembler(benchmark))
+                else if (ShouldUseClrMdDisassembler(benchmark))
                 {
-                    var runtime = benchmark.Job.ResolveValue(EnvironmentMode.RuntimeCharacteristic, EnvironmentResolver.Instance);
-
-                    if (runtime.RuntimeMoniker < RuntimeMoniker.NetCoreApp30)
+                    if (Config.RunInHost && toolchain?.IsInProcess != true && !PlatformsMatch(currentPlatform, benchmark.Job.Environment.Platform))
                     {
-                        yield return new ValidationError(true, $"{nameof(DisassemblyDiagnoser)} supports only .NET Core 3.0+", benchmark);
+                        yield return new ValidationError(true, $"{nameof(DisassemblyDiagnoser)} cannot run in host for a job that targets a different platform", benchmark);
                     }
 
-                    if (ptrace_scope.Value == "2")
+                    if (OsDetector.IsLinux())
                     {
-                        yield return new ValidationError(false, $"ptrace_scope is set to 2, {nameof(DisassemblyDiagnoser)} is going to work only if you run as sudo");
+                        if (runtime is CoreRuntime core && core.Version.Major < 3 && !Config.RunInHost)
+                        {
+                            yield return new ValidationError(true, $"{nameof(DisassemblyDiagnoser)} supports only .NET (Core) 3.0+ with RunInHost option, but the job targets {runtime}", benchmark);
+                        }
+
+                        if (ptrace_scope.Value == "2")
+                        {
+                            yield return new ValidationError(false, $"ptrace_scope is set to 2, {nameof(DisassemblyDiagnoser)} is going to work only if you run as sudo");
+                        }
+                        else if (ptrace_scope.Value == "3")
+                        {
+                            yield return new ValidationError(true, $"ptrace_scope is set to 3, {nameof(DisassemblyDiagnoser)} is not going to work");
+                        }
                     }
-                    else if (ptrace_scope.Value == "3")
-                    {
-                        yield return new ValidationError(true, $"ptrace_scope is set to 3, {nameof(DisassemblyDiagnoser)} is not going to work");
-                    }
+                }
+                else if (!ShouldUseMonoDisassembler(benchmark))
+                {
+                    yield return new ValidationError(true, $"{nameof(DisassemblyDiagnoser)} does not support this OS ({System.Runtime.InteropServices.RuntimeInformation.OSDescription}) without legacy Mono");
                 }
             }
+        }
+
+        private static bool PlatformsMatch(Platform currentPlatform, Platform targetPlatform)
+        {
+            Debug.Assert(currentPlatform != Platform.AnyCpu);
+
+            return targetPlatform == Platform.AnyCpu
+                // AnyCpu compiles to the bit-ness of the operating system.
+                // Legacy Framework also supports <Prefer32Bit> in Visual Studio,
+                // but we don't need to bother checking for it since we use dotnet sdk to build and we don't use or copy that property in generated csproj.
+                ? Environment.Is64BitProcess == Environment.Is64BitOperatingSystem
+                : currentPlatform == targetPlatform;
         }
 
         private static bool ShouldUseMonoDisassembler(BenchmarkCase benchmarkCase)
-            => benchmarkCase.Job.Environment.Runtime is MonoRuntime || RuntimeInformation.IsMono;
+            => benchmarkCase.GetRuntime() is LegacyMonoRuntime;
 
-        // when we add  macOS support, RuntimeInformation.IsMacOS() needs to be added here
         private static bool ShouldUseClrMdDisassembler(BenchmarkCase benchmarkCase)
-            => !ShouldUseMonoDisassembler(benchmarkCase) && (RuntimeInformation.IsWindows() || RuntimeInformation.IsLinux());
-
-        private static bool ShouldUseSameArchitectureDisassembler(BenchmarkCase benchmarkCase, DiagnoserActionParameters parameters)
-        {
-            if (ShouldUseClrMdDisassembler(benchmarkCase))
-            {
-                if (RuntimeInformation.IsWindows())
-                {
-                    return WindowsDisassembler.GetDisassemblerArchitecture(parameters.Process, benchmarkCase.Job.Environment.Platform)
-                        == RuntimeInformation.GetCurrentPlatform();
-                }
-
-                // on Unix currently host process architecture is always the same as benchmark process architecture
-                // (no official x86 support)
-                return true;
-            }
-
-            return false;
-        }
+            => !ShouldUseMonoDisassembler(benchmarkCase) && (OsDetector.IsWindows() || OsDetector.IsLinux() || OsDetector.IsMacOS());
 
         private static IEnumerable<IExporter> GetExporters(Dictionary<BenchmarkCase, DisassemblyResult> results, DisassemblyDiagnoserConfig config)
         {
@@ -176,7 +214,44 @@ namespace BenchmarkDotNet.Diagnosers
         }
 
         private static long SumNativeCodeSize(DisassemblyResult disassembly)
-            => disassembly.Methods.Sum(method => method.Maps.Sum(map => map.SourceCodes.OfType<Asm>().Sum(asm => asm.InstructionLength)));
+        {
+            long total = 0;
+
+            foreach (var method in disassembly.Methods)
+            {
+                foreach (var map in method.Maps)
+                {
+                    foreach (var asm in map.SourceCodes.OfType<Asm>())
+                    {
+                        total += asm.InstructionLength;
+                    }
+                }
+            }
+
+            return total;
+        }
+
+        InProcessDiagnoserHandlerData IInProcessDiagnoser.GetHandlerData(BenchmarkCase benchmarkCase)
+        {
+            if (GetRunMode(benchmarkCase) == RunMode.None
+                || Config.RunInHost
+                // We don't use handler for InProcess toolchains, the host diagnoser already handles it without needing to serialize data.
+                || (benchmarkCase.Job.Infrastructure.TryGetToolchain(out var toolchain) && toolchain.IsInProcess)
+                // Mono disassembler always runs another process.
+                || ShouldUseMonoDisassembler(benchmarkCase))
+            {
+                return default;
+            }
+
+            var clrMdArgs = BuildClrMdArgs(benchmarkCase, "", 0);
+            return new(typeof(DisassemblyDiagnoserInProcessHandler), BdnJsonSerializer.Serialize(clrMdArgs));
+        }
+
+        void IInProcessDiagnoser.DeserializeResults(BenchmarkCase benchmarkCase, string results)
+        {
+            var disassemblyResult = BdnJsonSerializer.Deserialize<DisassemblyResult>(results)!;
+            this.results.Add(benchmarkCase, disassemblyResult);
+        }
 
         private class NativeCodeSizeMetricDescriptor : IMetricDescriptor
         {
@@ -187,9 +262,43 @@ namespace BenchmarkDotNet.Diagnosers
             public string Legend => "Native code size of the disassembled method(s)";
             public string NumberFormat => "N0";
             public UnitType UnitType => UnitType.CodeSize;
-            public string Unit => SizeUnit.B.Name;
+            public string Unit => SizeUnit.B.Abbreviation;
             public bool TheGreaterTheBetter => false;
             public int PriorityInCategory => 0;
+            public bool GetIsAvailable(Metric metric) => true;
+        }
+    }
+
+    [UsedImplicitly]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class DisassemblyDiagnoserInProcessHandler : IInProcessDiagnoserHandler
+    {
+        private ClrMdArgs _clrMdArgs;
+        private DisassemblyResult _result = default!;
+
+        void IInProcessDiagnoserHandler.Initialize(string? serializedConfig)
+        {
+            _clrMdArgs = BdnJsonSerializer.Deserialize<ClrMdArgs>(serializedConfig!);
+        }
+
+        ValueTask IInProcessDiagnoserHandler.HandleAsync(BenchmarkSignal signal, InProcessDiagnoserActionArgs args, CancellationToken cancellationToken)
+        {
+            if (signal != BenchmarkSignal.AfterEngine)
+            {
+                return new();
+            }
+
+            var clrMdArgs = _clrMdArgs;
+            clrMdArgs.ProcessId = Process.GetCurrentProcess().Id;
+            clrMdArgs.TypeName = args.BenchmarkInstance.GetType().FullName!;
+            clrMdArgs.TypeHandle = args.BenchmarkInstance.GetType().TypeHandle.Value;
+            _result = DisassemblyDiagnoser.GetClrMdDisassembler().AttachAndDisassemble(clrMdArgs);
+            return new();
+        }
+
+        string IInProcessDiagnoserHandler.SerializeResults()
+        {
+            return BdnJsonSerializer.Serialize(_result);
         }
     }
 }

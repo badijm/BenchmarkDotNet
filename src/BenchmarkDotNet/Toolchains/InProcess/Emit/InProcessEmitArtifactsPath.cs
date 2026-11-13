@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Toolchains.InProcess.Emit
 {
@@ -12,6 +12,7 @@ namespace BenchmarkDotNet.Toolchains.InProcess.Emit
             baseArtifacts.RootArtifactsFolderPath,
             baseArtifacts.BuildArtifactsDirectoryPath,
             baseArtifacts.BinariesDirectoryPath,
+            baseArtifacts.PublishDirectoryPath,
             baseArtifacts.ProgramCodePath,
             baseArtifacts.AppConfigPath,
             baseArtifacts.NuGetConfigPath,

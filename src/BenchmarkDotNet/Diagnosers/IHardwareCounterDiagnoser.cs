@@ -1,4 +1,3 @@
-﻿using System.Collections.Generic;
 using BenchmarkDotNet.Running;
 
 namespace BenchmarkDotNet.Diagnosers

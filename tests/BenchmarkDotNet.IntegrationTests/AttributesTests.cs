@@ -1,7 +1,4 @@
-﻿using System;
 using BenchmarkDotNet.Attributes;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -23,7 +20,7 @@ namespace BenchmarkDotNet.IntegrationTests
             [CustomParams(ExpectedNumber)]
             public int Number;
 
-            public string Text;
+            public string Text = "";
 
             [CustomGlobalSetup]
             public void Setup()

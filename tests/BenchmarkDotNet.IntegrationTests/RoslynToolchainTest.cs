@@ -1,11 +1,8 @@
-﻿using System.Globalization;
-using System.Threading;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Tests.Loggers;
-using BenchmarkDotNet.Toolchains.Roslyn;
-using Xunit;
-using Xunit.Abstractions;
+using BenchmarkDotNet.Tests.XUnit;
+using BenchmarkDotNet.Toolchains.Framework;
+using System.Globalization;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -14,7 +11,7 @@ namespace BenchmarkDotNet.IntegrationTests
         public RoslynToolchainTest(ITestOutputHelper output) : base(output) { }
 
         /// <summary>Prooftest for #1039.</summary>
-        [Tests.XUnit.TheoryFullFrameworkOnly("Roslyn toolchain does not support .NET Core")]
+        [TheoryEnvSpecific("Roslyn toolchain does not support .NET Core", EnvRequirement.FullFrameworkOnly)]
         [InlineData("en-US")]
         [InlineData("fr-FR")]
         [InlineData("ru-RU")]
@@ -31,7 +28,7 @@ namespace BenchmarkDotNet.IntegrationTests
                 CultureInfo.CurrentCulture = overrideCulture;
                 CultureInfo.CurrentUICulture = overrideCulture;
 
-                var miniJob = Job.Dry.WithToolchain(RoslynToolchain.Instance);
+                var miniJob = Job.Dry.WithToolchain(RoslynFrameworkToolchain.Default);
                 var config = CreateSimpleConfig(job: miniJob);
 
                 CanExecute<SimpleBenchmarks>(config);

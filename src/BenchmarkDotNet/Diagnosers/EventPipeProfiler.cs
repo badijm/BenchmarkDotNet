@@ -1,22 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Diagnostics.Tracing;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Helpers;
-using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
 using Microsoft.Diagnostics.NETCore.Client;
+using System.Collections.Immutable;
+using System.Diagnostics.Tracing;
 
 namespace BenchmarkDotNet.Diagnosers
 {
@@ -24,15 +18,16 @@ namespace BenchmarkDotNet.Diagnosers
     {
         public static readonly EventPipeProfiler Default = new EventPipeProfiler();
 
-        private readonly Dictionary<BenchmarkCase, string> benchmarkToTraceFile = new Dictionary<BenchmarkCase, string>();
+        private readonly Dictionary<BenchmarkCase, string> benchmarkToTraceFile = [];
         private readonly ImmutableHashSet<EventPipeProvider> eventPipeProviders;
         private readonly bool performExtraBenchmarksRun;
 
-        private Task collectingTask;
+        private Task? collectingTask;
+        private EventPipeSession? session;
 
         // parameterless constructor required by DiagnosersLoader to support creating this profiler via console line args
         // we use performExtraBenchmarksRun = false for better first user experience
-        public EventPipeProfiler() :this(profile: EventPipeProfile.CpuSampling, performExtraBenchmarksRun: false) { }
+        public EventPipeProfiler() : this(profile: EventPipeProfile.CpuSampling, performExtraBenchmarksRun: false) { }
 
         /// <summary>
         /// Creates a new instance of EventPipeProfiler
@@ -40,7 +35,7 @@ namespace BenchmarkDotNet.Diagnosers
         /// <param name="profile">A named pre-defined set of provider configurations that allows common tracing scenarios to be specified succinctly.</param>
         /// <param name="providers">A list of EventPipe providers to be enabled.</param>
         /// <param name="performExtraBenchmarksRun">if set to true, benchmarks will be executed one more time with the profiler attached. If set to false, there will be no extra run but the results will contain overhead. True by default.</param>
-        public EventPipeProfiler(EventPipeProfile profile = EventPipeProfile.CpuSampling, IReadOnlyCollection<EventPipeProvider> providers = null, bool performExtraBenchmarksRun = true)
+        public EventPipeProfiler(EventPipeProfile profile = EventPipeProfile.CpuSampling, IReadOnlyCollection<EventPipeProvider>? providers = null, bool performExtraBenchmarksRun = true)
         {
             this.performExtraBenchmarksRun = performExtraBenchmarksRun;
             eventPipeProviders = MapToProviders(profile, providers);
@@ -48,61 +43,75 @@ namespace BenchmarkDotNet.Diagnosers
 
         public string ShortName => "EP";
 
-        public IEnumerable<string> Ids => new[] { nameof(EventPipeProfiler) };
+        public IEnumerable<string> Ids => [nameof(EventPipeProfiler)];
 
-        public IEnumerable<IExporter> Exporters => Array.Empty<IExporter>();
+        public IEnumerable<IExporter> Exporters => [];
 
-        public IEnumerable<IAnalyser> Analysers => Array.Empty<IAnalyser>();
+        public IEnumerable<IAnalyser> Analysers => [];
 
         public RunMode GetRunMode(BenchmarkCase benchmarkCase) => performExtraBenchmarksRun ? RunMode.ExtraRun : RunMode.NoOverhead;
 
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters)
+        public async IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters)
         {
             foreach (var benchmark in validationParameters.Benchmarks)
             {
-                var runtime = benchmark.Job.ResolveValue(EnvironmentMode.RuntimeCharacteristic, EnvironmentResolver.Instance);
+                var runtime = benchmark.GetRuntime();
 
-                if (runtime.RuntimeMoniker < RuntimeMoniker.NetCoreApp30)
+                // EventPipeProfiler is out-of-process: it attaches to the benchmark process by PID via the .NET
+                // diagnostics IPC server (DiagnosticsClient), introduced in .NET Core 3.0. WASM is excluded because it
+                // runs inside a JavaScript engine with no attachable diagnostics server.
+                bool supported = runtime switch
                 {
-                    yield return new ValidationError(true, $"{nameof(EventPipeProfiler)} supports only .NET Core 3.0+", benchmark);
+                    CoreRuntime core => core.Version.Major >= 3,
+                    NativeAotRuntime or R2RRuntime or MonoCoreRuntime => true,
+                    _ => false,
+                };
+                if (!supported)
+                {
+                    yield return new ValidationError(true, $"{nameof(EventPipeProfiler)} supports only .NET (Core) 3.0+, but the job targets {runtime}", benchmark);
                 }
             }
         }
 
-        public void Handle(HostSignal signal, DiagnoserActionParameters parameters)
+        public async ValueTask HandleAsync(HostSignal signal, DiagnoserActionParameters parameters, CancellationToken cancellationToken)
         {
-            if (signal != HostSignal.BeforeAnythingElse)
-                return;
+            if (signal == HostSignal.BeforeAnythingElse)
+            {
+                var diagnosticsClient = new DiagnosticsClient(parameters.ProcessId);
 
-            var diagnosticsClient = new DiagnosticsClient(parameters.Process.Id);
+                session = diagnosticsClient.StartEventPipeSession(eventPipeProviders, true);
 
-            EventPipeSession session = diagnosticsClient.StartEventPipeSession(eventPipeProviders, true);
+                var fileName = ArtifactFileNameHelper.GetTraceFilePath(parameters, DateTime.Now, "nettrace").EnsureFolderExists();
+                benchmarkToTraceFile[parameters.BenchmarkCase] = fileName;
 
-            var fileName = ArtifactFileNameHelper.GetTraceFilePath(parameters, DateTime.Now, "nettrace").EnsureFolderExists();
-            benchmarkToTraceFile[parameters.BenchmarkCase] = fileName;
-
-            collectingTask = Task.Run(() => CopyEventStreamToFile(session, fileName, parameters.Config.GetCompositeLogger()));
+                collectingTask = Task.Run(() => CopyEventStreamToFile(session, fileName, parameters.Config.GetCompositeLogger(), cancellationToken), cancellationToken);
+            }
+            else if (signal == HostSignal.AfterAll)
+            {
+                await session!.StopAsync(cancellationToken).ConfigureAwait(false);
+                await collectingTask!.ConfigureAwait(false);
+            }
         }
 
-        private static void CopyEventStreamToFile(EventPipeSession session, string fileName, ILogger logger)
+        private static async Task CopyEventStreamToFile(EventPipeSession session, string fileName, ILogger logger, CancellationToken cancellationToken)
         {
             try
             {
                 using (session)
-                using (var fs = new FileStream(fileName, FileMode.Create, FileAccess.Write))
+                using (var fs = new FileStream(fileName, FileMode.Create, FileAccess.Write, FileShare.Read, 4096, useAsync: true))
                 {
                     byte[] buffer = new byte[16 * 1024];
                     int bytesRead = 0;
 
-                    while ((bytesRead = session.EventStream.Read(buffer, 0, buffer.Length)) > 0)
+                    while ((bytesRead = await session.EventStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
                     {
-                        fs.Write(buffer, 0, bytesRead);
+                        await fs.WriteAsync(buffer, 0, bytesRead, cancellationToken).ConfigureAwait(false);
                     }
 
-                    fs.Flush();
+                    await fs.FlushAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 logger.WriteLine(LogKind.Error, $"An exception occurred during reading trace stream: {ex}");
             }
@@ -110,24 +119,22 @@ namespace BenchmarkDotNet.Diagnosers
 
         public IEnumerable<Metric> ProcessResults(DiagnoserResults results)
         {
-            Task.WaitAll(collectingTask);
-
             if (benchmarkToTraceFile.TryGetValue(results.BenchmarkCase, out var traceFilePath))
                 benchmarkToTraceFile[results.BenchmarkCase] = SpeedScopeExporter.Convert(traceFilePath, results.BenchmarkCase.Config.GetCompositeLogger());
 
-            return Array.Empty<Metric>();
+            return [];
         }
 
         public void DisplayResults(ILogger resultLogger)
         {
-            if (!benchmarkToTraceFile.Any())
+            if (benchmarkToTraceFile.Count == 0)
                 return;
 
             resultLogger.WriteLineInfo($"Exported {benchmarkToTraceFile.Count} trace file(s). Example:");
             resultLogger.WriteLineInfo(benchmarkToTraceFile.Values.First());
         }
 
-        internal static ImmutableHashSet<EventPipeProvider> MapToProviders(EventPipeProfile profile, IReadOnlyCollection<EventPipeProvider> providers)
+        internal static ImmutableHashSet<EventPipeProvider> MapToProviders(EventPipeProfile profile, IReadOnlyCollection<EventPipeProvider>? providers)
         {
             var uniqueProviders = ImmutableHashSet.CreateBuilder<EventPipeProvider>(EventPipeProviderEqualityComparer.Instance);
 
@@ -154,7 +161,16 @@ namespace BenchmarkDotNet.Diagnosers
         {
             internal static readonly IEqualityComparer<EventPipeProvider> Instance = new EventPipeProviderEqualityComparer();
 
-            public bool Equals(EventPipeProvider x, EventPipeProvider y) => x.Name.Equals(y.Name);
+            public bool Equals(EventPipeProvider? x, EventPipeProvider? y)
+            {
+                if (ReferenceEquals(x, y))
+                    return true;
+
+                if (x is null || y is null)
+                    return false;
+
+                return x.Name.Equals(y.Name);
+            }
 
             public int GetHashCode(EventPipeProvider obj) => obj.Name.GetHashCode();
         }

@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Globalization;
-using System.Linq;
-using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
@@ -11,23 +5,24 @@ using BenchmarkDotNet.Order;
 using BenchmarkDotNet.Parameters;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
-using BenchmarkDotNet.Validators;
-using Xunit;
+using BenchmarkDotNet.Tests.Mocks;
+using System.Collections.Immutable;
+using System.Globalization;
 
 namespace BenchmarkDotNet.Tests.Order
 {
     public class DefaultOrdererTests
     {
-        private static Summary CreateMockSummary() => new ("", ImmutableArray<BenchmarkReport>.Empty, HostEnvironmentInfo.GetCurrent(),
-            "", "", TimeSpan.Zero, CultureInfo.InvariantCulture, ImmutableArray<ValidationError>.Empty, ImmutableArray<IColumnHidingRule>.Empty);
+        private static Summary CreateMockSummary() => new("", [], HostEnvironmentInfo.GetCurrent(),
+            "", "", TimeSpan.Zero, CultureInfo.InvariantCulture, [], []);
 
-        private static BenchmarkCase CreateBenchmarkCase(string category, int parameter, params BenchmarkLogicalGroupRule[] rules) => new (
-            new Descriptor(null, null, categories: new[] { category }),
+        private static BenchmarkCase CreateBenchmarkCase(string category, int parameter, params BenchmarkLogicalGroupRule[] rules) => new(
+            new Descriptor(MockFactory.MockType, MockFactory.MockMethodInfo, categories: [category]),
             new Job(),
-            new ParameterInstances(new[]
-            {
-                new ParameterInstance(new ParameterDefinition("P", false, null, false, null, 0), parameter, SummaryStyle.Default)
-            }),
+            new ParameterInstances(
+            [
+                new ParameterInstance(new ParameterDefinition("P", isStatic: false, isArgument: false, parameterType: typeof(object), 0), parameter, SummaryStyle.Default)
+            ]),
             DefaultConfig.Instance.AddLogicalGroupRules(rules).CreateImmutableConfig()
         );
 
@@ -45,17 +40,17 @@ namespace BenchmarkDotNet.Tests.Order
                 CreateBenchmarkCase("B", 2)
             }.ToImmutableArray();
             string[] sortedBenchmarkCases = DefaultOrderer.Instance.GetSummaryOrder(benchmarkCases, summary).Select(GetId).ToArray();
-            Assert.Equal(new[] { "A1", "A2", "B1", "B2" }, sortedBenchmarkCases);
+            Assert.Equal(["A1", "A2", "B1", "B2"], sortedBenchmarkCases);
         }
 
         [Fact]
         public void OrderCanBeOverriden()
         {
             BenchmarkLogicalGroupRule[] rules =
-            {
+            [
                 BenchmarkLogicalGroupRule.ByParams,
                 BenchmarkLogicalGroupRule.ByCategory,
-            };
+            ];
             var summary = CreateMockSummary();
             var benchmarkCases = new List<BenchmarkCase>
             {
@@ -65,7 +60,7 @@ namespace BenchmarkDotNet.Tests.Order
                 CreateBenchmarkCase("B", 2, rules)
             }.ToImmutableArray();
             string[] sortedBenchmarkCases = DefaultOrderer.Instance.GetSummaryOrder(benchmarkCases, summary).Select(GetId).ToArray();
-            Assert.Equal(new[] { "A1", "B1", "A2", "B2" }, sortedBenchmarkCases);
+            Assert.Equal(["A1", "B1", "A2", "B2"], sortedBenchmarkCases);
         }
     }
 }

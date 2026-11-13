@@ -1,7 +1,9 @@
-﻿namespace BenchmarkDotNet.Engines
+namespace BenchmarkDotNet.Engines
 {
     public enum IterationStage
     {
+        Unknown,
+
         Jitting,
 
         /// <summary>
@@ -15,6 +17,6 @@
 
         Result,
 
-        Unknown
+        Extra,
     }
 }

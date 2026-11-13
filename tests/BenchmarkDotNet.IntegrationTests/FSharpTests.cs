@@ -1,5 +1,3 @@
-﻿using Xunit;
-using Xunit.Abstractions;
 using static FSharpBenchmarks;
 
 namespace BenchmarkDotNet.IntegrationTests
@@ -10,5 +8,9 @@ namespace BenchmarkDotNet.IntegrationTests
 
         [Fact]
         public void ParamsSupportFSharpEnums() => CanExecute<EnumParamsTest>();
+
+        // #2530
+        [Fact]
+        public void FSharpAnonymousRecordIsSupported() => CanExecute<AnonymousRecordTest>();
     }
 }

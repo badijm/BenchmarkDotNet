@@ -1,11 +1,10 @@
-﻿using System;
-using System.Security.Cryptography;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
+using System.Security.Cryptography;
 
 namespace BenchmarkDotNet.Samples
 {
@@ -38,7 +37,7 @@ namespace BenchmarkDotNet.Samples
                 .Run<Algo_Md5VsSha256>(
                     DefaultConfig.Instance
                         .AddJob(Job.Default.WithRuntime(ClrRuntime.Net462))
-                        .AddJob(Job.Default.WithRuntime(CoreRuntime.Core21))
+                        .AddJob(Job.Default.WithRuntime(CoreRuntime.Core80))
                         .AddValidator(ExecutionValidator.FailOnError));
         }
     }

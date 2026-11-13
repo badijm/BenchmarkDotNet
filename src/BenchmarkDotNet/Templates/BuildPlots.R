@@ -75,7 +75,7 @@ for (file in files) {
   }
 
   resultStats <- result %>%
-    group_by_(.dots = c("Target_Method", "Job_Id")) %>%
+    group_by(Target_Method, Job_Id) %>%
     summarise(se = std.error(Measurement_Value), Value = mean(Measurement_Value))
 
   benchmarkBoxplot <- ggplot(result, aes(x=Target_Method, y=Measurement_Value, fill=Job_Id)) +
@@ -105,7 +105,7 @@ for (file in files) {
     densityPlot <- ggplot(df, aes(x=Measurement_Value, fill=Job_Id)) +
       ggtitle(paste(title, "/", target)) +
       xlab(paste("Time,", timeUnit)) +
-      geom_density(alpha=.5, bw="SJ")
+      geom_density(alpha=.5, bw="sj")
     printNice(densityPlot)
     ggsaveNice(gsub("-measurements.csv", paste0("-", target, "-density.png"), file), densityPlot)
 
@@ -118,7 +118,7 @@ for (file in files) {
       paramsDensityPlot <- ggplot(paramsDf, aes(x=Measurement_Value, fill=Job_Id)) +
         ggtitle(paste(title, "/", target, "/", params)) +
         xlab(paste("Time,", timeUnit)) +
-        geom_density(alpha=.5, bw="SJ")
+        geom_density(alpha=.5, bw="sj")
       printNice(paramsDensityPlot)
       prefix <- createPrefix(c(target,params))
       ggsaveNice(gsub("-measurements.csv", paste0(prefix, "-density.png"), file), paramsDensityPlot)
@@ -155,7 +155,7 @@ for (file in files) {
       densityPlotJob <- ggplot(jobDf, aes(x=Measurement_Value, fill="red")) +
         ggtitle(paste(title, "/", target, "/", job)) +
         xlab(paste("Time,", timeUnit)) +
-        geom_density(alpha=.5, bw="SJ")
+        geom_density(alpha=.5, bw="sj")
       printNice(densityPlotJob)
       ggsaveNice(gsub("-measurements.csv", paste0("-", target, "-", job, "-density.png"), file), densityPlotJob)
     }

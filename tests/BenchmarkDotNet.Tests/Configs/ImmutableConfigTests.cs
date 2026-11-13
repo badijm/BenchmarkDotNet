@@ -1,6 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
@@ -8,12 +5,12 @@ using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Toolchains;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Order;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Tests.XUnit;
 using BenchmarkDotNet.Validators;
-using Xunit;
 
 namespace BenchmarkDotNet.Tests.Configs
 {
@@ -85,7 +82,9 @@ namespace BenchmarkDotNet.Tests.Configs
             Assert.Equal(HardwareCounter.CacheMisses, final.GetHardwareCounters().Single());
         }
 
-        [FactClassicDotNetOnly(skipReason: "We have hardware counters diagnosers only for Windows. This test is disabled for .NET Core because NativeAOT compiler goes crazy when some dependency has reference to TraceEvent...")]
+        [FactEnvSpecific(
+            "We have hardware counters diagnosers only for Windows. This test is disabled for .NET Core because NativeAOT compiler goes crazy when some dependency has reference to TraceEvent...",
+            EnvRequirement.FullFrameworkOnly)]
         public void WhenUserDefinesHardwareCountersWeChooseTheRightDiagnoser()
         {
             var mutable = ManualConfig.CreateEmpty();
@@ -98,7 +97,9 @@ namespace BenchmarkDotNet.Tests.Configs
             Assert.Single(final.GetDiagnosers().OfType<IHardwareCountersDiagnoser>());
         }
 
-        [FactClassicDotNetOnly(skipReason: "We have hardware counters diagnosers only for Windows. This test is disabled for .NET Core because NativeAOT compiler goes crazy when some dependency has reference to TraceEvent...")]
+        [FactEnvSpecific(
+            "We have hardware counters diagnosers only for Windows. This test is disabled for .NET Core because NativeAOT compiler goes crazy when some dependency has reference to TraceEvent...",
+            EnvRequirement.FullFrameworkOnly)]
         public void WhenUserDefinesHardwareCountersAndUsesDisassemblyDiagnoserWeAddInstructionPointerExporter()
         {
             var mutable = ManualConfig.CreateEmpty();
@@ -137,6 +138,19 @@ namespace BenchmarkDotNet.Tests.Configs
             var final = ImmutableConfigBuilder.Create(mutable);
 
             Assert.Same(MarkdownExporter.GitHub, final.GetExporters().Single());
+        }
+
+        [Fact]
+        public void MultipleExportersOfSameTypeWithDifferentNamesAreAccepted()
+        {
+            var mutable = ManualConfig.CreateEmpty();
+
+            mutable.AddExporter(MarkdownExporter.GitHub);
+            mutable.AddExporter(MarkdownExporter.Atlassian);
+
+            var final = ImmutableConfigBuilder.Create(mutable);
+
+            Assert.Equal(2, final.GetExporters().Count());
         }
 
         [Fact]
@@ -212,7 +226,7 @@ namespace BenchmarkDotNet.Tests.Configs
             var exporters = ImmutableConfigBuilder.Create(mutable).GetExporters().ToArray();
 
             Assert.Equal(2, exporters.Length);
-            Assert.Equal(new IExporter[] { TestExporterDependency.Default, TestExporter.Default }, exporters);
+            Assert.Equal([TestExporterDependency.Default, TestExporter.Default], exporters);
         }
 
         [Fact]
@@ -226,22 +240,22 @@ namespace BenchmarkDotNet.Tests.Configs
             var exporters = ImmutableConfigBuilder.Create(mutable).GetExporters().ToArray();
 
             Assert.Equal(2, exporters.Length);
-            Assert.Equal(new IExporter[] { TestExporterDependency.Default, TestExporter.Default }, exporters);
+            Assert.Equal([TestExporterDependency.Default, TestExporter.Default], exporters);
         }
 
         [Fact]
         public void WhenTwoConfigsAreAddedTheRegularJobsAreJustAdded()
         {
-            var configWithClrJob = CreateConfigFromJobs(Job.Default.WithRuntime(CoreRuntime.Core21));
-            var configWithCoreJob = CreateConfigFromJobs(Job.Default.WithRuntime(ClrRuntime.Net462));
+            var configWithClrJob = CreateConfigFromJobs(Job.Default.WithRuntime(ClrRuntime.Net462));
+            var configWithCoreJob = CreateConfigFromJobs(Job.Default.WithRuntime(CoreRuntime.Core80));
 
-            foreach (var added in AddLeftToTheRightAndRightToTheLef(configWithClrJob, configWithCoreJob))
+            foreach (var added in AddLeftToTheRightAndRightToTheLef(configWithCoreJob, configWithClrJob))
             {
                 var runnableJobs = added.GetJobs();
 
                 Assert.Equal(2, runnableJobs.Count());
-                Assert.Single(runnableJobs, job => job.Environment.Runtime is ClrRuntime);
-                Assert.Single(runnableJobs, job => job.Environment.Runtime is CoreRuntime);
+                Assert.Single(runnableJobs, job => job.GetRuntime() is ClrRuntime);
+                Assert.Single(runnableJobs, job => job.GetRuntime() is CoreRuntime);
             }
         }
 
@@ -251,8 +265,8 @@ namespace BenchmarkDotNet.Tests.Configs
             const int warmupCount = 2;
             var configWithMutatorJob = CreateConfigFromJobs(Job.Default.WithWarmupCount(warmupCount).AsMutator());
             var configWithTwoStandardJobs = CreateConfigFromJobs(
-                Job.Default.WithRuntime(ClrRuntime.Net462),
-                Job.Default.WithRuntime(CoreRuntime.Core21));
+                Job.Default.WithRuntime(ClrRuntime.Net472),
+                Job.Default.WithRuntime(CoreRuntime.Core80));
 
             foreach (var added in AddLeftToTheRightAndRightToTheLef(configWithTwoStandardJobs, configWithMutatorJob))
             {
@@ -260,8 +274,8 @@ namespace BenchmarkDotNet.Tests.Configs
 
                 Assert.Equal(2, runnableJobs.Count());
                 Assert.All(runnableJobs, job => Assert.Equal(warmupCount, job.Run.WarmupCount));
-                Assert.Single(runnableJobs, job => job.Environment.Runtime is ClrRuntime);
-                Assert.Single(runnableJobs, job => job.Environment.Runtime is CoreRuntime);
+                Assert.Single(runnableJobs, job => job.GetRuntime() is ClrRuntime);
+                Assert.Single(runnableJobs, job => job.GetRuntime() is CoreRuntime);
             }
         }
 
@@ -295,7 +309,7 @@ namespace BenchmarkDotNet.Tests.Configs
                 Assert.Equal(warmupCount, mergedJob.Run.WarmupCount);
                 Assert.False(mergedJob.Meta.IsDefault); // after the merge the "child" job becomes a standard job
                 Assert.False(mergedJob.Meta.IsMutator); // after the merge the "child" job becomes a standard job
-                Assert.Single(mergedJob.GetCharacteristicsWithValues(), changedCharacteristic => ReferenceEquals(changedCharacteristic, Jobs.RunMode.WarmupCountCharacteristic));
+                Assert.Single(mergedJob.GetCharacteristicsWithValues(), changedCharacteristic => ReferenceEquals(changedCharacteristic, BenchmarkDotNet.Jobs.RunMode.WarmupCountCharacteristic));
             }
         }
 
@@ -305,6 +319,22 @@ namespace BenchmarkDotNet.Tests.Configs
             var mutable = ManualConfig.CreateEmpty();
             var final = ImmutableConfigBuilder.Create(mutable);
             Assert.Equal(final.ArtifactsPath, DefaultConfig.Instance.ArtifactsPath);
+        }
+
+        [Fact]
+        public void WhenTitleIsNullItStaysNullSoTheDefaultIsUsedLater()
+        {
+            var mutable = ManualConfig.CreateEmpty();
+            var final = ImmutableConfigBuilder.Create(mutable);
+            Assert.Null(final.Title);
+        }
+
+        [Fact]
+        public void CustomTitleIsPreserved()
+        {
+            var mutable = ManualConfig.CreateEmpty().WithTitle("MyCustomTitle");
+            var final = ImmutableConfigBuilder.Create(mutable);
+            Assert.Equal("MyCustomTitle", final.Title);
         }
 
         [Fact]
@@ -359,6 +389,45 @@ namespace BenchmarkDotNet.Tests.Configs
             Assert.Equal(TimeSpan.FromSeconds(2), final.BuildTimeout);
         }
 
+        [Fact]
+        public void WhenWakeLockIsNotSpecifiedTheDefaultValueIsUsed()
+        {
+            var mutable = ManualConfig.CreateEmpty();
+            var final = ImmutableConfigBuilder.Create(mutable);
+            Assert.Equal(DefaultConfig.Instance.WakeLock, final.WakeLock);
+        }
+
+        [Fact]
+        public void CustomWakeLockHasPrecedenceOverDefaultWakeLock()
+        {
+            WakeLockType customWakeLock = WakeLockType.Display;
+            var mutable = ManualConfig.CreateEmpty().WithWakeLock(customWakeLock);
+            var final = ImmutableConfigBuilder.Create(mutable);
+            Assert.Equal(customWakeLock, final.WakeLock);
+        }
+
+        [Theory]
+        [InlineData(WakeLockType.None, WakeLockType.None, WakeLockType.None)]
+        [InlineData(WakeLockType.System, WakeLockType.None, WakeLockType.None)]
+        [InlineData(WakeLockType.Display, WakeLockType.None, WakeLockType.Display)]
+        [InlineData(WakeLockType.None, WakeLockType.System, WakeLockType.None)]
+        [InlineData(WakeLockType.System, WakeLockType.System, WakeLockType.System)]
+        [InlineData(WakeLockType.Display, WakeLockType.System, WakeLockType.Display)]
+        [InlineData(WakeLockType.None, WakeLockType.Display, WakeLockType.Display)]
+        [InlineData(WakeLockType.System, WakeLockType.Display, WakeLockType.Display)]
+        [InlineData(WakeLockType.Display, WakeLockType.Display, WakeLockType.Display)]
+        public void WhenTwoCustomWakeLocksAreProvidedDisplayBeatsNoneBeatsDefault(
+            WakeLockType left, WakeLockType right, WakeLockType expected)
+        {
+            var l = ManualConfig.CreateEmpty().WithWakeLock(left);
+            var r = ManualConfig.CreateEmpty().WithWakeLock(right);
+
+            l.Add(r);
+
+            var final = ImmutableConfigBuilder.Create(l);
+            Assert.Equal(expected, final.WakeLock);
+        }
+
         private static ManualConfig CreateConfigFromJobs(params Job[] jobs)
         {
             var config = ManualConfig.CreateEmpty();
@@ -376,7 +445,7 @@ namespace BenchmarkDotNet.Tests.Configs
             var leftAddedToTheRight = ManualConfig.Create(right);
             leftAddedToTheRight.Add(left);
 
-            return new[]{ rightAddedToLeft.CreateImmutableConfig(), leftAddedToTheRight.CreateImmutableConfig() };
+            return [rightAddedToLeft.CreateImmutableConfig(), leftAddedToTheRight.CreateImmutableConfig()];
         }
 
         public class TestExporter : IExporter, IExporterDependencies
@@ -388,27 +457,23 @@ namespace BenchmarkDotNet.Tests.Configs
                 get { yield return TestExporterDependency.Default; }
             }
 
-            public IEnumerable<string> ExportToFiles(Summary summary, ILogger consoleLogger) => Enumerable.Empty<string>();
-
             public string Name => nameof(TestExporter);
-            public void ExportToLog(Summary summary, ILogger logger) { }
+            public ValueTask ExportAsync(Summary summary, ILogger logger, CancellationToken cancellationToken) => new();
         }
 
         public class TestExporterDependency : IExporter
         {
             public static readonly TestExporterDependency Default = new TestExporterDependency();
 
-            public IEnumerable<string> ExportToFiles(Summary summary, ILogger consoleLogger) => Enumerable.Empty<string>();
-
             public string Name => nameof(TestExporterDependency);
-            public void ExportToLog(Summary summary, ILogger logger) { }
+            public ValueTask ExportAsync(Summary summary, ILogger logger, CancellationToken cancellationToken) => new();
         }
 
         [Fact]
         public void GenerateWarningWhenExporterDependencyAlreadyExistInConfig()
         {
-            System.Globalization.CultureInfo currentCulture = default;
-            System.Globalization.CultureInfo currentUICulture = default;
+            System.Globalization.CultureInfo? currentCulture = default;
+            System.Globalization.CultureInfo? currentUICulture = default;
             {
                 var ct = System.Threading.Thread.CurrentThread;
                 currentCulture = ct.CurrentCulture;
@@ -424,7 +489,7 @@ namespace BenchmarkDotNet.Tests.Configs
 
                 var final = ImmutableConfigBuilder.Create(mutable);
 
-                Assert.Equal(1, final.ConfigAnalysisConclusion.Count);
+                Assert.Single(final.ConfigAnalysisConclusion);
             }
             finally
             {

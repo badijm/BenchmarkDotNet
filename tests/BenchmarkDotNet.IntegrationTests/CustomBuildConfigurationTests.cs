@@ -1,29 +1,28 @@
-﻿using System;
 using System.Reflection;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.IntegrationTests.Xunit;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Portability;
-using Xunit;
-using Xunit.Abstractions;
+using BenchmarkDotNet.Tests.XUnit;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
+    [Collection(Constants.LongRunningTests)]
     public class CustomBuildConfigurationTests : BenchmarkTestExecutor
     {
         public CustomBuildConfigurationTests(ITestOutputHelper output) : base(output)
         {
         }
 
-        [Fact]
+        [FactEnvSpecific(EnvRequirement.NonGitHubDraftPR)]
         public void UserCanSpecifyCustomBuildConfiguration()
         {
-            if (ContinuousIntegration.IsAppVeyorOnWindows())
-                return; // timeouts
-
             var jobWithCustomConfiguration = Job.Dry.WithCustomBuildConfiguration("CUSTOM");
 
             var config = CreateSimpleConfig(job: jobWithCustomConfiguration);
+            config = ((ManualConfig) config).WithBuildTimeout(TimeSpan.FromSeconds(360));
 
             var report = CanExecute<CustomBuildConfiguration>(config);
 

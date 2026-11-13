@@ -1,14 +1,37 @@
-﻿using System;
-using System.Collections.Generic;
 using BenchmarkDotNet.Characteristics;
+using BenchmarkDotNet.Order;
+using System.Collections;
 
 namespace BenchmarkDotNet.Jobs
 {
     internal class JobComparer : IComparer<Job>, IEqualityComparer<Job>
     {
-        public static readonly JobComparer Instance = new JobComparer();
+        private readonly IComparer<string> Comparer;
+        private static IComparer<string> NumericComparer =>
+#if NET10_0_OR_GREATER
+            StringComparer.Create(System.Globalization.CultureInfo.InvariantCulture, System.Globalization.CompareOptions.NumericOrdering);
+#else
+            new NumericStringComparer();
+#endif
 
-        public int Compare(Job x, Job y)
+        public static readonly JobComparer Default = new(JobOrderPolicy.Numeric);
+        public static readonly JobComparer Ordinal = new(JobOrderPolicy.Ordinal);
+
+        private JobComparer(JobOrderPolicy jobOrderPolicy)
+        {
+            switch (jobOrderPolicy)
+            {
+                case JobOrderPolicy.Ordinal:
+                    Comparer = StringComparer.Ordinal;
+                    break;
+
+                default:
+                    Comparer = NumericComparer;
+                    break;
+            }
+        }
+
+        public int Compare(Job? x, Job? y)
         {
             if (ReferenceEquals(x, y))
                 return 0;
@@ -26,6 +49,12 @@ namespace BenchmarkDotNet.Jobs
 
             foreach (var characteristic in x.GetAllCharacteristics())
             {
+                // Categories say which jobs the user wants to select, they are not a part of what a job *is*.
+                // Comparing them would let two jobs that differ only by category survive the deduplication done by
+                // ImmutableConfigBuilder, which would run the same job twice under two identical names.
+                if (characteristic == MetaMode.CategoriesCharacteristic)
+                    continue;
+
                 if (!x.HasValue(characteristic))
                 {
                     if (y.HasValue(characteristic))
@@ -39,7 +68,7 @@ namespace BenchmarkDotNet.Jobs
                     continue;
                 }
 
-                int compare = string.CompareOrdinal(
+                int compare = Comparer.Compare(
                     presenter.ToPresentation(x, characteristic),
                     presenter.ToPresentation(y, characteristic));
                 if (compare != 0)
@@ -49,8 +78,129 @@ namespace BenchmarkDotNet.Jobs
             return 0;
         }
 
-        public bool Equals(Job x, Job y) => Compare(x, y) == 0;
+        public bool Equals(Job? x, Job? y)
+        {
+            if (ReferenceEquals(x, y))
+                return true;
+            if (x is null || y is null)
+                return false;
+            if (x.GetType() != y.GetType())
+                return false;
+
+            // Compare the actual characteristic values, not their string presentations (which is what Compare uses).
+            // Presentation is lossy for some characteristics - most importantly a toolchain presents as just its name
+            // and runtime version, so two jobs that differ only by toolchain settings would otherwise be considered
+            // equal and silently deduplicated.
+            foreach (var characteristic in x.GetAllCharacteristics())
+            {
+                // Child-bearing characteristics (the job modes) are already covered by their leaf characteristics.
+                if (characteristic.HasChildCharacteristics)
+                    continue;
+
+                // Categories are skipped for the same reason as in Compare: they say which jobs the user wants to
+                // select, not what a job *is*. This is the overload that GroupBy and Distinct use, so comparing them
+                // here is what would actually let two jobs differing only by category run twice under one name.
+                if (characteristic == MetaMode.CategoriesCharacteristic)
+                    continue;
+
+                bool xHasValue = x.HasValue(characteristic);
+                if (xHasValue != y.HasValue(characteristic))
+                    return false;
+                if (xHasValue && !ValuesEqual(characteristic[x], characteristic[y]))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool ValuesEqual(object? x, object? y)
+        {
+            if (ReferenceEquals(x, y))
+                return true;
+            if (x is null || y is null)
+                return false;
+            // Compare collections (e.g. Arguments, EnvironmentVariables) structurally; their elements have value equality.
+            if (x is not string && x is IEnumerable xItems && y is IEnumerable yItems)
+                return xItems.Cast<object>().SequenceEqual(yItems.Cast<object>());
+            return x.Equals(y);
+        }
 
         public int GetHashCode(Job obj) => obj.Id.GetHashCode();
+
+#if !NET10_0_OR_GREATER
+        private class NumericStringComparer : IComparer<string>
+        {
+            public int Compare(string? x, string? y)
+            {
+                if (ReferenceEquals(x, y)) return 0;
+                if (x == null) return -1;
+                if (y == null) return 1;
+
+                ReadOnlySpan<char> spanX = x.AsSpan();
+                ReadOnlySpan<char> spanY = y.AsSpan();
+
+                int i = 0, j = 0;
+
+                while (i < spanX.Length && j < spanY.Length)
+                {
+                    char cx = spanX[i];
+                    char cy = spanY[j];
+
+                    if (!char.IsDigit(cx) || !char.IsDigit(cy))
+                    {
+                        int cmp = cx.CompareTo(cy);
+                        if (cmp != 0)
+                            return cmp;
+
+                        i++;
+                        j++;
+                        continue;
+                    }
+
+                    int ixStart = i;
+                    int iyStart = j;
+
+                    // Skip leading zeros
+                    while (ixStart < spanX.Length && spanX[ixStart] == '0') ixStart++;
+                    while (iyStart < spanY.Length && spanY[iyStart] == '0') iyStart++;
+
+                    int ix = ixStart;
+                    int iy = iyStart;
+
+                    // Skip digits
+                    while (ix < spanX.Length && char.IsDigit(spanX[ix])) ix++;
+                    while (iy < spanY.Length && char.IsDigit(spanY[iy])) iy++;
+
+                    int lenX = ix - ixStart;
+                    int lenY = iy - iyStart;
+
+                    // Compare by digits length
+                    if (lenX != lenY)
+                        return lenX.CompareTo(lenY);
+
+                    // Compare digits
+                    for (int k = 0; k < lenX; k++)
+                    {
+                        int cmp = spanX[ixStart + k].CompareTo(spanY[iyStart + k]);
+                        if (cmp != 0)
+                            return cmp;
+                    }
+
+                    // Compare by leading zeros
+                    int leadingZerosX = ixStart - i;
+                    int leadingZerosY = iyStart - j;
+                    if (leadingZerosX != leadingZerosY)
+                        return 0; // Leading zero differences are ignored (`CompareOptions.NumericOrdering` behavior of .NET)
+
+                    // Move to the next character after the digits
+                    i = ix;
+                    j = iy;
+                }
+
+                // Compare remaining chars
+                return (spanX.Length - i).CompareTo(spanY.Length - j);
+            }
+        }
+#endif
     }
 }

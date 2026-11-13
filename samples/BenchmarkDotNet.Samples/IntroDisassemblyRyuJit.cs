@@ -1,4 +1,3 @@
-﻿using System.Linq;
 using BenchmarkDotNet.Attributes;
 
 namespace BenchmarkDotNet.Samples

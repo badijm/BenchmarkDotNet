@@ -1,10 +1,7 @@
-﻿using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Security;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Loggers;
+using System.Security;
 
 namespace BenchmarkDotNet.Validators
 {
@@ -16,7 +13,7 @@ namespace BenchmarkDotNet.Validators
 
         public bool TreatsWarningsAsErrors => false;
 
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters)
+        public async IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters)
         {
             if (validationParameters.Config.GetLoggers().IsEmpty())
             {
@@ -38,7 +35,7 @@ namespace BenchmarkDotNet.Validators
                 yield return pathValidation;
         }
 
-        private static ValidationError ValidateArtifactsPath(string artifactsPath)
+        private static ValidationError? ValidateArtifactsPath(string artifactsPath)
         {
             if (artifactsPath == null) // null is OK, default path will be used
                 return null;

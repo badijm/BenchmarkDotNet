@@ -1,13 +1,10 @@
-﻿using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Text;
-
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using BenchmarkDotNet.Toolchains.InProcess.NoEmit;
+using System.Reflection;
+using System.Text;
 
 namespace BenchmarkDotNet.Analysers
 {
@@ -35,7 +32,7 @@ namespace BenchmarkDotNet.Analysers
             if (unexpectedExit)
             {
                 var avProducts = summary.HostEnvironmentInfo.AntivirusProducts.Value;
-                if (avProducts.Any())
+                if (avProducts.Count != 0)
                     yield return CreateWarning(CreateWarningAboutAntivirus(avProducts));
             }
 

@@ -1,6 +1,5 @@
-﻿using System;
-using System.Diagnostics.Tracing;
 using JetBrains.Annotations;
+using System.Diagnostics.Tracing;
 
 namespace BenchmarkDotNet.Engines
 {
@@ -28,14 +27,14 @@ namespace BenchmarkDotNet.Engines
 
         public class Tasks
         {
-            [PublicAPI] public const EventTask Benchmark = (EventTask)1;
-            [PublicAPI] public const EventTask OverheadJitting = (EventTask)2;
-            [PublicAPI] public const EventTask WorkloadJitting = (EventTask)3;
-            [PublicAPI] public const EventTask WorkloadPilot = (EventTask)4;
-            [PublicAPI] public const EventTask OverheadWarmup = (EventTask)5;
-            [PublicAPI] public const EventTask OverheadActual = (EventTask)6;
-            [PublicAPI] public const EventTask WorkloadWarmup = (EventTask)7;
-            [PublicAPI] public const EventTask WorkloadActual = (EventTask)8;
+            [PublicAPI] public const EventTask Benchmark = (EventTask) 1;
+            [PublicAPI] public const EventTask OverheadJitting = (EventTask) 2;
+            [PublicAPI] public const EventTask WorkloadJitting = (EventTask) 3;
+            [PublicAPI] public const EventTask WorkloadPilot = (EventTask) 4;
+            [PublicAPI] public const EventTask OverheadWarmup = (EventTask) 5;
+            [PublicAPI] public const EventTask OverheadActual = (EventTask) 6;
+            [PublicAPI] public const EventTask WorkloadWarmup = (EventTask) 7;
+            [PublicAPI] public const EventTask WorkloadActual = (EventTask) 8;
         }
 
         internal static readonly EngineEventSource Log = new EngineEventSource();

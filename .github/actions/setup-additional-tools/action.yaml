@@ -1,0 +1,39 @@
+name: Setup Additional Tools
+description: |
+  Setup additional tools that required for Wasm/NativeAOT tests
+  - Node.js
+  - V8 with jsvu
+  - .NET wasm-tools workload
+
+runs:
+  using: composite
+  steps:
+
+    - name: Print Node.js version
+      shell: bash
+      run: node --version
+
+    - name: Set up v8
+      shell: bash
+      run: npx jsvu --os=default --engines=v8
+
+    - name: Add `GITHUB_PATH` environment variable
+      shell: pwsh
+      run: |
+        $jsvuDir = Join-Path $HOME '.jsvu/bin'
+        Add-Content -Path $env:GITHUB_PATH -Value $jsvuDir
+
+    - name: Add `GITHUB_PATH` environment variable and verify command exists
+      shell: pwsh
+      run: |
+        if (-not (Get-Command v8 -ErrorAction SilentlyContinue)) {
+            throw "v8 command is not found."
+        }
+
+    - name: Install wasm-tools workload
+      shell: bash
+      run: ./build.cmd install-wasm-tools
+
+    - name: Shutdown dotnet build-server
+      shell: bash
+      run: .dotnet/dotnet build-server shutdown

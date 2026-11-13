@@ -1,14 +1,12 @@
-using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Parameters;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using JetBrains.Annotations;
+using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
 
 namespace BenchmarkDotNet.Order
 {
@@ -19,7 +17,7 @@ namespace BenchmarkDotNet.Order
 
         private readonly IComparer<string[]> categoryComparer = CategoryComparer.Instance;
         private readonly IComparer<ParameterInstances> paramsComparer = ParameterComparer.Instance;
-        private readonly IComparer<Job> jobComparer = JobComparer.Instance;
+        private readonly IComparer<Job> jobComparer;
         private readonly IComparer<Descriptor> targetComparer;
 
         public SummaryOrderPolicy SummaryOrderPolicy { get; }
@@ -27,17 +25,21 @@ namespace BenchmarkDotNet.Order
 
         public DefaultOrderer(
             SummaryOrderPolicy summaryOrderPolicy = SummaryOrderPolicy.Default,
-            MethodOrderPolicy methodOrderPolicy = MethodOrderPolicy.Declared)
+            MethodOrderPolicy methodOrderPolicy = MethodOrderPolicy.Declared,
+            JobOrderPolicy jobOrderPolicy = JobOrderPolicy.Numeric)
         {
             SummaryOrderPolicy = summaryOrderPolicy;
             MethodOrderPolicy = methodOrderPolicy;
+            jobComparer = jobOrderPolicy == JobOrderPolicy.Ordinal
+                ? JobComparer.Ordinal
+                : JobComparer.Default;
             targetComparer = new DescriptorComparer(methodOrderPolicy);
         }
 
         [PublicAPI]
         public virtual IEnumerable<BenchmarkCase> GetExecutionOrder(
             ImmutableArray<BenchmarkCase> benchmarkCases,
-            IEnumerable<BenchmarkLogicalGroupRule> order = null)
+            IEnumerable<BenchmarkLogicalGroupRule>? order = null)
         {
             var benchmarkComparer = new BenchmarkComparer(categoryComparer, paramsComparer, jobComparer, targetComparer, order);
             var list = benchmarkCases.ToList();
@@ -49,8 +51,8 @@ namespace BenchmarkDotNet.Order
         {
             var benchmarkLogicalGroups = benchmarksCases.GroupBy(b => GetLogicalGroupKey(benchmarksCases, b));
             foreach (var logicalGroup in GetLogicalGroupOrder(benchmarkLogicalGroups, benchmarksCases.FirstOrDefault()?.Config.GetLogicalGroupRules()))
-            foreach (var benchmark in GetSummaryOrderForGroup(logicalGroup.ToImmutableArray(), summary))
-                yield return benchmark;
+                foreach (var benchmark in GetSummaryOrderForGroup(logicalGroup.ToImmutableArray(), summary))
+                    yield return benchmark;
         }
 
         protected virtual IEnumerable<BenchmarkCase> GetSummaryOrderForGroup(ImmutableArray<BenchmarkCase> benchmarksCase, Summary summary)
@@ -70,7 +72,7 @@ namespace BenchmarkDotNet.Order
             }
         }
 
-        public string GetHighlightGroupKey(BenchmarkCase benchmarkCase)
+        public virtual string? GetHighlightGroupKey(BenchmarkCase benchmarkCase)
         {
             switch (SummaryOrderPolicy)
             {
@@ -83,7 +85,7 @@ namespace BenchmarkDotNet.Order
             }
         }
 
-        public string GetLogicalGroupKey(ImmutableArray<BenchmarkCase> allBenchmarksCases, BenchmarkCase benchmarkCase)
+        public virtual string GetLogicalGroupKey(ImmutableArray<BenchmarkCase> allBenchmarksCases, BenchmarkCase benchmarkCase)
         {
             var explicitRules = benchmarkCase.Config.GetLogicalGroupRules().ToList();
             var implicitRules = new List<BenchmarkLogicalGroupRule>();
@@ -106,8 +108,7 @@ namespace BenchmarkDotNet.Order
             }
 
             var rules = new List<BenchmarkLogicalGroupRule>(explicitRules);
-            foreach (var rule in implicitRules.Where(rule => !rules.Contains(rule)))
-                rules.Add(rule);
+            rules.AddRangeDistinct(implicitRules);
 
             var keys = new List<string>();
             foreach (var rule in rules)
@@ -121,7 +122,7 @@ namespace BenchmarkDotNet.Order
                         keys.Add(benchmarkCase.Job.DisplayInfo);
                         break;
                     case BenchmarkLogicalGroupRule.ByParams:
-                        keys.Add(benchmarkCase.Parameters.ValueInfo);
+                        keys.Add($"DistinctParamSet{allBenchmarksCases.IndexOf(benchmarkCase, BenchmarkParamsEqualityComparer.Instance)}");
                         break;
                     case BenchmarkLogicalGroupRule.ByCategory:
                         keys.Add(string.Join(",", benchmarkCase.Descriptor.Categories));
@@ -137,7 +138,7 @@ namespace BenchmarkDotNet.Order
 
         public virtual IEnumerable<IGrouping<string, BenchmarkCase>> GetLogicalGroupOrder(
             IEnumerable<IGrouping<string, BenchmarkCase>> logicalGroups,
-            IEnumerable<BenchmarkLogicalGroupRule> order = null)
+            IEnumerable<BenchmarkLogicalGroupRule>? order = null)
         {
             var benchmarkComparer = new BenchmarkComparer(categoryComparer, paramsComparer, jobComparer, targetComparer, order);
             var logicalGroupComparer = new LogicalGroupComparer(benchmarkComparer);
@@ -151,12 +152,12 @@ namespace BenchmarkDotNet.Order
         private class BenchmarkComparer : IComparer<BenchmarkCase>
         {
             private static readonly BenchmarkLogicalGroupRule[] DefaultOrder =
-            {
+            [
                 BenchmarkLogicalGroupRule.ByCategory,
                 BenchmarkLogicalGroupRule.ByParams,
                 BenchmarkLogicalGroupRule.ByJob,
                 BenchmarkLogicalGroupRule.ByMethod
-            };
+            ];
 
             private readonly IComparer<string[]> categoryComparer;
             private readonly IComparer<ParameterInstances> paramsComparer;
@@ -169,24 +170,24 @@ namespace BenchmarkDotNet.Order
                 IComparer<ParameterInstances> paramsComparer,
                 IComparer<Job> jobComparer,
                 IComparer<Descriptor> targetComparer,
-                IEnumerable<BenchmarkLogicalGroupRule> order)
+                IEnumerable<BenchmarkLogicalGroupRule>? order)
             {
                 this.categoryComparer = categoryComparer;
                 this.targetComparer = targetComparer;
                 this.jobComparer = jobComparer;
                 this.paramsComparer = paramsComparer;
 
-                this.order = new List<BenchmarkLogicalGroupRule>();
-                foreach (var rule in (order ?? ImmutableArray<BenchmarkLogicalGroupRule>.Empty).Concat(DefaultOrder))
+                this.order = [];
+                foreach (var rule in (order ?? []).Concat(DefaultOrder))
                     if (!this.order.Contains(rule))
                         this.order.Add(rule);
             }
 
-            public int Compare(BenchmarkCase x, BenchmarkCase y)
+            public int Compare(BenchmarkCase? x, BenchmarkCase? y)
             {
-                if (x == null && y == null) return 0;
-                if (x != null && y == null) return 1;
-                if (x == null) return -1;
+                if (ReferenceEquals(x, y)) return 0;
+                if (x is null) return -1;
+                if (y is null) return 1;
 
                 foreach (var rule in order)
                 {
@@ -205,17 +206,36 @@ namespace BenchmarkDotNet.Order
             }
         }
 
+        private sealed class BenchmarkParamsEqualityComparer : IEqualityComparer<BenchmarkCase>
+        {
+            internal static readonly BenchmarkParamsEqualityComparer Instance = new();
+
+            bool IEqualityComparer<BenchmarkCase>.Equals(BenchmarkCase? x, BenchmarkCase? y)
+            {
+                if (ReferenceEquals(x, y))
+                    return true;
+                if (x is null || y is null)
+                    return false;
+
+                return ParameterEqualityComparer.Instance.Equals(x.Parameters, y.Parameters);
+            }
+
+            int IEqualityComparer<BenchmarkCase>.GetHashCode(BenchmarkCase obj)
+                => ParameterEqualityComparer.Instance.GetHashCode(obj.Parameters);
+        }
+
         private class LogicalGroupComparer : IComparer<IGrouping<string, BenchmarkCase>>
         {
             private readonly IComparer<BenchmarkCase> benchmarkComparer;
 
             public LogicalGroupComparer(IComparer<BenchmarkCase> benchmarkComparer) => this.benchmarkComparer = benchmarkComparer;
 
-            public int Compare(IGrouping<string, BenchmarkCase> x, IGrouping<string, BenchmarkCase> y)
+            public int Compare(IGrouping<string, BenchmarkCase>? x, IGrouping<string, BenchmarkCase>? y)
             {
-                if (x == null && y == null) return 0;
-                if (x != null && y == null) return 1;
-                if (x == null) return -1;
+                if (ReferenceEquals(x, y)) return 0;
+                if (x is null) return -1;
+                if (y is null) return 1;
+
                 return benchmarkComparer.Compare(x.First(), y.First());
             }
         }

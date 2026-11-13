@@ -1,5 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
 using System.Reflection;
 using System.Reflection.Emit;
 
@@ -7,25 +5,6 @@ namespace BenchmarkDotNet.Helpers.Reflection.Emit
 {
     internal static class IlGeneratorCallExtensions
     {
-        public static LocalBuilder DeclareOptionalLocalForInstanceCall(
-            this ILGenerator ilBuilder,
-            Type localType,
-            MethodInfo methodToCall)
-        {
-            if (methodToCall.DeclaringType == null)
-                throw new ArgumentException($"The {nameof(methodToCall)} should have non-null {nameof(methodToCall.DeclaringType)}.");
-
-            if (methodToCall.IsStatic)
-                return null;
-
-            if (!methodToCall.DeclaringType.IsAssignableFrom(localType))
-                throw new ArgumentException($"{methodToCall.DeclaringType} is not assignable from {localType}.");
-
-            return localType.IsValueType && localType != typeof(void)
-                ? ilBuilder.DeclareLocal(localType)
-                : null;
-        }
-
         public static void EmitStaticCall(
             this ILGenerator ilBuilder,
             MethodInfo methodToCall,
@@ -46,7 +25,7 @@ namespace BenchmarkDotNet.Helpers.Reflection.Emit
 
         public static void EmitInstanceCallThisValueOnStack(
             this ILGenerator ilBuilder,
-            LocalBuilder optionalLocalThis,
+            LocalBuilder? optionalLocalThis,
             MethodInfo methodToCall,
             IEnumerable<LocalBuilder> argLocals,
             bool forceDirectCall = false)
@@ -67,8 +46,7 @@ namespace BenchmarkDotNet.Helpers.Reflection.Emit
             */
             if (methodToCall.DeclaringType.IsValueType)
             {
-                if (optionalLocalThis == null)
-                    throw new ArgumentNullException(nameof(optionalLocalThis));
+                ArgumentNullException.ThrowIfNull(optionalLocalThis);
 
                 ilBuilder.EmitStloc(optionalLocalThis);
                 EmitCallCore(ilBuilder, optionalLocalThis, methodToCall, argLocals, forceDirectCall);
@@ -81,7 +59,7 @@ namespace BenchmarkDotNet.Helpers.Reflection.Emit
 
         private static void EmitCallCore(
             this ILGenerator ilBuilder,
-            LocalBuilder optionalLocalThis,
+            LocalBuilder? optionalLocalThis,
             MethodInfo methodToCall,
             IEnumerable<LocalBuilder> argLocals,
             bool forceDirectCall = false)
@@ -107,8 +85,7 @@ namespace BenchmarkDotNet.Helpers.Reflection.Emit
             }
             else if (methodToCall.DeclaringType.IsValueType)
             {
-                if (optionalLocalThis == null)
-                    throw new ArgumentNullException(nameof(optionalLocalThis));
+                ArgumentNullException.ThrowIfNull(optionalLocalThis);
 
                 ilBuilder.EmitLdloca(optionalLocalThis);
                 ilBuilder.EmitLdLocals(argLocals);

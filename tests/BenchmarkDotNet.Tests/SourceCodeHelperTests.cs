@@ -1,8 +1,5 @@
-﻿using System;
-using System.Reflection;
 using BenchmarkDotNet.Helpers;
-using Xunit;
-using Xunit.Abstractions;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Tests
 {
@@ -23,8 +20,8 @@ namespace BenchmarkDotNet.Tests
         [InlineData('\\', "'\\\\'")]
         [InlineData(0.123f, "0.123f")]
         [InlineData(0.123d, "0.123d")]
-        [InlineData(BindingFlags.Public, "(System.Reflection.BindingFlags)(16)")]
-        public void ToSourceCodeSimpleTest(object original, string expected)
+        [InlineData(BindingFlags.Public, "(global::System.Reflection.BindingFlags)(16)")]
+        public void ToSourceCodeSimpleTest(object? original, string expected)
         {
             string actual = SourceCodeHelper.ToSourceCode(original);
             output.WriteLine("ORIGINAL  : " + original + " (" + original?.GetType() + ")");

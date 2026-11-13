@@ -1,6 +1,5 @@
-﻿using System;
-using System.Security.Cryptography;
 using BenchmarkDotNet.Attributes;
+using System.Security.Cryptography;
 
 namespace BenchmarkDotNet.Samples
 {

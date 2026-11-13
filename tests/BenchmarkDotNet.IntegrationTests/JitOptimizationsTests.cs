@@ -1,9 +1,5 @@
-using System;
-using System.Linq;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -17,12 +13,12 @@ namespace BenchmarkDotNet.IntegrationTests
         }
 
         [Fact]
-        public void UserGetsWarningWhenNonOptimizedDllIsReferenced()
+        public async Task UserGetsWarningWhenNonOptimizedDllIsReferenced()
         {
             var benchmarksWithNonOptimizedDll = CreateBenchmarks(typeof(DisabledOptimizations.OptimizationsDisabledInCsproj));
 
-            var warnings = JitOptimizationsValidator.DontFailOnError.Validate(benchmarksWithNonOptimizedDll).ToArray();
-            var criticalErrors = JitOptimizationsValidator.FailOnError.Validate(benchmarksWithNonOptimizedDll).ToArray();
+            var warnings = await JitOptimizationsValidator.DontFailOnError.ValidateAsync(benchmarksWithNonOptimizedDll).ToArrayAsync();
+            var criticalErrors = await JitOptimizationsValidator.FailOnError.ValidateAsync(benchmarksWithNonOptimizedDll).ToArrayAsync();
 
             Assert.NotEmpty(warnings);
             Assert.True(warnings.All(error => error.IsCritical == false));
@@ -31,13 +27,13 @@ namespace BenchmarkDotNet.IntegrationTests
         }
 
         [Fact]
-        public void UserGetsNoWarningWhenOnlyOptimizedDllAreReferenced()
+        public async Task UserGetsNoWarningWhenOnlyOptimizedDllAreReferenced()
         {
             var benchmarksWithOptimizedDll = CreateBenchmarks(typeof(EnabledOptimizations.OptimizationsEnabledInCsproj));
 
-            var warnings = JitOptimizationsValidator.DontFailOnError.Validate(benchmarksWithOptimizedDll).ToArray();
+            var warnings = await JitOptimizationsValidator.DontFailOnError.ValidateAsync(benchmarksWithOptimizedDll).ToArrayAsync();
 
-            if (warnings.Any())
+            if (warnings.Length != 0)
             {
                 output.WriteLine("*** Warnings ***");
                 foreach (var warning in warnings)

@@ -1,9 +1,6 @@
-﻿using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.Linq;
 using System.Reflection;
 
 namespace BenchmarkDotNet.Exporters.Xml
@@ -15,7 +12,7 @@ namespace BenchmarkDotNet.Exporters.Xml
         private readonly IReadOnlyDictionary<string, string> collectionItemNameMap;
         private readonly IReadOnlyCollection<string> excludedPropertyNames;
 
-        private IXmlWriter writer;
+        private IXmlWriter writer = default!;
 
         public const string DefaultItemName = "Item";
 
@@ -31,8 +28,10 @@ namespace BenchmarkDotNet.Exporters.Xml
 
         public void Serialize(IXmlWriter newWriter, object source)
         {
-            if (source == null || source.GetType() != type)
-                throw new ArgumentNullException(nameof(source));
+            ArgumentNullException.ThrowIfNull(source);
+
+            if (source.GetType() != type)
+                throw new ArgumentException(nameof(source));
 
             writer = newWriter ?? throw new ArgumentNullException(nameof(newWriter));
 
@@ -58,7 +57,7 @@ namespace BenchmarkDotNet.Exporters.Xml
             writer.WriteEndElement();
         }
 
-        private void WriteProperty(object source, PropertyInfo property)
+        private void WriteProperty(object? source, PropertyInfo property)
         {
             if (source == null || excludedPropertyNames.Contains(property.Name))
                 return;
@@ -88,7 +87,7 @@ namespace BenchmarkDotNet.Exporters.Xml
             }
         }
 
-        private void WriteComplexProperty(object source, PropertyInfo propertyInfo)
+        private void WriteComplexProperty(object? source, PropertyInfo propertyInfo)
         {
             writer.WriteStartElement(propertyInfo.Name);
 
@@ -103,14 +102,14 @@ namespace BenchmarkDotNet.Exporters.Xml
         [SuppressMessage("ReSharper", "PossibleMultipleEnumeration")]
         private void WriteCollectionProperty(object source, PropertyInfo property)
         {
-            var collection = (IEnumerable)property.GetValue(source);
+            var collection = (IEnumerable?) property.GetValue(source);
 
-            if (!IsCollectionWritable(collection))
+            if (collection == null || !IsCollectionWritable(collection))
                 return;
 
             writer.WriteStartElement(property.Name);
 
-            string itemName = null;
+            string? itemName = null;
 
             foreach (var item in collection)
             {
@@ -157,12 +156,12 @@ namespace BenchmarkDotNet.Exporters.Xml
             => typeof(IEnumerable).IsAssignableFrom(property.PropertyType);
 
         private static bool IsCollectionWritable(IEnumerable collection)
-            => collection?.Cast<object>().FirstOrDefault() != null;
+            => collection.Cast<object>().FirstOrDefault() != null;
 
         internal class XmlSerializerBuilder
         {
-            private readonly Dictionary<string, string> collectionItemNameMap = new Dictionary<string, string>();
-            private readonly HashSet<string> excludedPropertyNames = new HashSet<string>();
+            private readonly Dictionary<string, string> collectionItemNameMap = [];
+            private readonly HashSet<string> excludedPropertyNames = [];
 
             public Type Type { get; }
             public string RootName { get; private set; }
@@ -171,8 +170,7 @@ namespace BenchmarkDotNet.Exporters.Xml
 
             public XmlSerializerBuilder(Type type)
             {
-                if (type == null)
-                    throw new ArgumentNullException(nameof(type));
+                ArgumentNullException.ThrowIfNull(type);
 
                 Type = type;
                 RootName = type.Name;

@@ -1,5 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
-using System.Threading;
+using BenchmarkDotNet.Attributes;
 
 namespace BenchmarkDotNet.Samples
 {
@@ -23,7 +22,7 @@ namespace BenchmarkDotNet.Samples
         public void Benchmark()
         {
             Thread.Sleep(
-                (int)E * 100 +
+                (int) E * 100 +
                 (B == true ? 20 : B == false ? 10 : 0));
         }
     }

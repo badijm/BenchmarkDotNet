@@ -1,5 +1,3 @@
-﻿using System;
-
 namespace BenchmarkDotNet.Attributes
 {
     public abstract class PriorityAttribute : Attribute

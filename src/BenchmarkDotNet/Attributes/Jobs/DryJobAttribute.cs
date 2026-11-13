@@ -1,6 +1,5 @@
-﻿using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
-using System;
 
 namespace BenchmarkDotNet.Attributes
 {
@@ -15,7 +14,7 @@ namespace BenchmarkDotNet.Attributes
         /// defines a new Dry Job that targets specified Framework
         /// </summary>
         /// <param name="runtimeMoniker">Target Framework to test.</param>
-        public DryJobAttribute(RuntimeMoniker runtimeMoniker)
+        public DryJobAttribute(string runtimeMoniker)
             : base(GetJob(Job.Dry, runtimeMoniker, null, null))
         {
         }
@@ -26,7 +25,7 @@ namespace BenchmarkDotNet.Attributes
         /// <param name="runtimeMoniker">Target Framework to test.</param>
         /// <param name="jit">Jit to test.</param>
         /// <param name="platform">Platform to test.</param>
-        public DryJobAttribute(RuntimeMoniker runtimeMoniker, Jit jit, Platform platform)
+        public DryJobAttribute(string runtimeMoniker, Jit jit, Platform platform)
             : base(GetJob(Job.Dry, runtimeMoniker, jit, platform))
         {
         }

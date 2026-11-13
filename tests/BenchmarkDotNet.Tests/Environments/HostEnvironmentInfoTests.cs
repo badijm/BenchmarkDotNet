@@ -1,10 +1,8 @@
-﻿using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Tests.Builders;
 using JetBrains.Annotations;
-using Xunit;
+using Perfolizer.Helpers;
 
 namespace BenchmarkDotNet.Tests.Environments
 {
@@ -21,8 +19,8 @@ namespace BenchmarkDotNet.Tests.Environments
 
             string line = info.ToFormattedString().First();
 
-            string expected = $"{HostEnvironmentInfo.BenchmarkDotNetCaption}=v{info.BenchmarkDotNetVersion}, " +
-                              $"OS={info.OsVersion.Value}, VM={hypervisor.Name}";
+            string expected = $"{HostEnvironmentInfo.BenchmarkDotNetCaption} v{info.BenchmarkDotNetVersion}, " +
+                              $"{info.Os.Value.ToBrandString()} ({hypervisor.Name})";
             Assert.Equal(expected, line);
         }
 
@@ -45,8 +43,8 @@ namespace BenchmarkDotNet.Tests.Environments
 
             string line = info.ToFormattedString().First();
 
-            string expected = $"{HostEnvironmentInfo.BenchmarkDotNetCaption}=v{info.BenchmarkDotNetVersion}, " +
-                              $"OS={info.OsVersion.Value}";
+            string expected = $"{HostEnvironmentInfo.BenchmarkDotNetCaption} v{info.BenchmarkDotNetVersion}, " +
+                              $"{info.Os.Value.ToBrandString()}";
             Assert.Equal(expected, line);
         }
     }

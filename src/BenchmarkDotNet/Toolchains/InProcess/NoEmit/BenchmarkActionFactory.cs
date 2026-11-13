@@ -1,150 +1,153 @@
-﻿using System;
-using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Threading.Tasks;
-
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Running;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 
-using JetBrains.Annotations;
+namespace BenchmarkDotNet.Toolchains.InProcess.NoEmit;
 
-namespace BenchmarkDotNet.Toolchains.InProcess.NoEmit
+internal static class BenchmarkActionFactory
 {
-    /// <summary>Helper class that creates <see cref="BenchmarkAction"/> instances. </summary>
-    public static partial class BenchmarkActionFactory
+    private static IBenchmarkAction CreateCore(IBenchmarkActionFactory? factory, object instance, MethodInfo targetMethod, int unrollFactor, bool consumeTasksSynchronously = false)
     {
-        /// <summary>
-        /// Dispatch method that creates <see cref="BenchmarkAction"/> using
-        /// <paramref name="targetMethod"/> or <paramref name="fallbackIdleSignature"/> to find correct implementation.
-        /// Either <paramref name="targetMethod"/> or <paramref name="fallbackIdleSignature"/> should be not <c>null</c>.
-        /// </summary>
-        private static BenchmarkAction CreateCore(
-            object instance,
-            MethodInfo? targetMethod,
-            MethodInfo? fallbackIdleSignature,
-            int unrollFactor)
+        if (factory?.TryCreate(instance, targetMethod, unrollFactor, out var benchmarkAction) == true)
         {
-            PrepareInstanceAndResultType(instance, targetMethod, fallbackIdleSignature, out var resultInstance, out var resultType);
+            return benchmarkAction;
+        }
 
-            if (resultType == typeof(void))
-                return new BenchmarkActionVoid(resultInstance, targetMethod, unrollFactor);
+        PrepareInstanceAndResultType(instance, targetMethod, out var resultInstance, out var resultType);
 
-            if (resultType == typeof(Task))
-                return new BenchmarkActionTask(resultInstance, targetMethod, unrollFactor);
+        if (resultType == typeof(void))
+            return new BenchmarkActionVoid(resultInstance, targetMethod, unrollFactor);
 
-            if (resultType.GetTypeInfo().IsGenericType)
-            {
-                var genericType = resultType.GetGenericTypeDefinition();
-                var argType = resultType.GenericTypeArguments[0];
-                if (typeof(Task<>) == genericType)
-                    return Create(
-                        typeof(BenchmarkActionTask<>).MakeGenericType(argType),
-                        resultInstance,
-                        targetMethod,
-                        unrollFactor);
+        if (resultType == typeof(void*))
+            return new BenchmarkActionVoidPointer(resultInstance, targetMethod, unrollFactor);
 
-                if (typeof(ValueTask<>).IsAssignableFrom(genericType))
-                    return Create(
-                        typeof(BenchmarkActionValueTask<>).MakeGenericType(argType),
-                        resultInstance,
-                        targetMethod,
-                        unrollFactor);
-            }
-
-            if (targetMethod == null && resultType.GetTypeInfo().IsValueType)
-                // for Idle: we return int because creating bigger ValueType could take longer than benchmarked method itself.
-                resultType = typeof(int);
+        if (resultType.IsByRef)
+        {
+            var returnParameter = targetMethod.ReturnParameter;
+            // IsReadOnlyAttribute is not part of netstandard2.0, so we need to check the attribute name as usual.
+            if (returnParameter.GetCustomAttributes().Any(attribute => attribute.GetType().FullName == "System.Runtime.CompilerServices.IsReadOnlyAttribute"))
+                return Create(
+                    typeof(BenchmarkActionByRefReadonly<>).MakeGenericType(resultType.GetElementType()!),
+                    resultInstance,
+                    targetMethod,
+                    unrollFactor);
 
             return Create(
-                typeof(BenchmarkAction<>).MakeGenericType(resultType),
+                typeof(BenchmarkActionByRef<>).MakeGenericType(resultType.GetElementType()!),
                 resultInstance,
                 targetMethod,
                 unrollFactor);
         }
 
-        private static void PrepareInstanceAndResultType(
-            object instance, MethodInfo targetMethod, MethodInfo fallbackIdleSignature,
-            out object resultInstance, out Type resultType)
+        if (resultType == typeof(Task))
+            return consumeTasksSynchronously
+                ? new BenchmarkActionBlockingTask(resultInstance, targetMethod, unrollFactor)
+                : new BenchmarkActionTask(resultInstance, targetMethod, unrollFactor);
+
+        if (resultType == typeof(ValueTask))
+            return consumeTasksSynchronously
+                ? new BenchmarkActionBlockingValueTask(resultInstance, targetMethod, unrollFactor)
+                : new BenchmarkActionValueTask(resultInstance, targetMethod, unrollFactor);
+
+        if (resultType.GetTypeInfo().IsGenericType)
         {
-            var signature = targetMethod ?? fallbackIdleSignature;
-            if (signature == null)
-                throw new ArgumentNullException(
-                    nameof(fallbackIdleSignature),
-                    $"Either {nameof(targetMethod)} or  {nameof(fallbackIdleSignature)} should be not null.");
+            var genericType = resultType.GetGenericTypeDefinition();
+            var argType = resultType.GenericTypeArguments[0];
+            if (typeof(Task<>) == genericType)
+                return Create(
+                    consumeTasksSynchronously
+                        ? typeof(BenchmarkActionBlockingTask<>).MakeGenericType(argType)
+                        : typeof(BenchmarkActionTask<>).MakeGenericType(argType),
+                    resultInstance,
+                    targetMethod,
+                    unrollFactor);
 
-            if (!signature.IsStatic && instance == null)
-                throw new ArgumentNullException(
-                    nameof(instance),
-                    $"The {nameof(instance)} parameter should be not null as invocation method is instance method.");
-
-            resultInstance = signature.IsStatic ? null : instance;
-            resultType = signature.ReturnType;
-
-            if (resultType == typeof(void))
-            {
-                // DONTTOUCH: async should be checked for target method
-                // as fallbackIdleSignature used for result type detection only.
-                bool isUsingAsyncKeyword = targetMethod?.HasAttribute<AsyncStateMachineAttribute>() ?? false;
-                if (isUsingAsyncKeyword)
-                    throw new NotSupportedException("Async void is not supported by design.");
-            }
+            if (typeof(ValueTask<>) == genericType)
+                return Create(
+                    consumeTasksSynchronously
+                        ? typeof(BenchmarkActionBlockingValueTask<>).MakeGenericType(argType)
+                        : typeof(BenchmarkActionValueTask<>).MakeGenericType(argType),
+                    resultInstance,
+                    targetMethod,
+                    unrollFactor);
         }
 
-        /// <summary>Helper to enforce .ctor signature.</summary>
-        private static BenchmarkActionBase Create(Type actionType, object instance, MethodInfo method, int unrollFactor) =>
-            (BenchmarkActionBase)Activator.CreateInstance(actionType, instance, method, unrollFactor);
+        if (resultType.IsAwaitable(out _))
+        {
+            throw new NotSupportedException($"Default {nameof(BenchmarkActionFactory)} does not support returning awaitable types except (Value)Task(<T>).");
+        }
 
-        private static void FallbackMethod() { }
-        private static readonly MethodInfo FallbackSignature = new Action(FallbackMethod).GetMethodInfo();
-        private static readonly MethodInfo DummyMethod = typeof(DummyInstance).GetMethod(nameof(DummyInstance.Dummy));
+        if (resultType.IsAsyncEnumerable(out var asyncEnumerableInfo))
+        {
+            var asyncEnumerableInterface = typeof(IAsyncEnumerable<>).MakeGenericType(asyncEnumerableInfo.ItemType);
+            if (asyncEnumerableInterface.IsAssignableFrom(resultType))
+            {
+                return Create(
+                    typeof(BenchmarkActionAsyncEnumerable<>).MakeGenericType(asyncEnumerableInfo.ItemType),
+                    resultInstance,
+                    targetMethod,
+                    unrollFactor);
+            }
+            if (resultType.IsGenericType && resultType.GetGenericTypeDefinition() == typeof(ConfiguredCancelableAsyncEnumerable<>))
+            {
+                return Create(
+                    typeof(BenchmarkActionConfiguredCancelableAsyncEnumerable<>).MakeGenericType(asyncEnumerableInfo.ItemType),
+                    resultInstance,
+                    targetMethod,
+                    unrollFactor);
+            }
+            throw new NotSupportedException(
+                $"Default {nameof(BenchmarkActionFactory)} does not support custom async enumerables besides IAsyncEnumerable<T> and ConfiguredCancelableAsyncEnumerable<T>");
+        }
 
-        /// <summary>Creates run benchmark action.</summary>
-        /// <param name="descriptor">Descriptor info.</param>
-        /// <param name="instance">Instance of target.</param>
-        /// <param name="unrollFactor">Unroll factor.</param>
-        /// <returns>Run benchmark action.</returns>
-        public static BenchmarkAction CreateWorkload(Descriptor descriptor, object instance, int unrollFactor) =>
-            CreateCore(instance, descriptor.WorkloadMethod, null, unrollFactor);
-
-        /// <summary>Creates idle benchmark action.</summary>
-        /// <param name="descriptor">Descriptor info.</param>
-        /// <param name="instance">Instance of target.</param>
-        /// <param name="unrollFactor">Unroll factor.</param>
-        /// <returns>Idle benchmark action.</returns>
-        public static BenchmarkAction CreateOverhead(Descriptor descriptor, object instance, int unrollFactor) =>
-            CreateCore(instance, null, descriptor.WorkloadMethod, unrollFactor);
-
-        /// <summary>Creates global setup benchmark action.</summary>
-        /// <param name="descriptor">Descriptor info.</param>
-        /// <param name="instance">Instance of target.</param>
-        /// <returns>Setup benchmark action.</returns>
-        public static BenchmarkAction CreateGlobalSetup(Descriptor descriptor, object instance) =>
-            CreateCore(instance, descriptor.GlobalSetupMethod, FallbackSignature, 1);
-
-        /// <summary>Creates global cleanup benchmark action.</summary>
-        /// <param name="descriptor">Descriptor info.</param>
-        /// <param name="instance">Instance of target.</param>
-        /// <returns>Cleanup benchmark action.</returns>
-        public static BenchmarkAction CreateGlobalCleanup(Descriptor descriptor, object instance) =>
-            CreateCore(instance, descriptor.GlobalCleanupMethod, FallbackSignature, 1);
-
-        /// <summary>Creates global setup benchmark action.</summary>
-        /// <param name="descriptor">Descriptor info.</param>
-        /// <param name="instance">Instance of target.</param>
-        /// <returns>Setup benchmark action.</returns>
-        public static BenchmarkAction CreateIterationSetup(Descriptor descriptor, object instance) =>
-            CreateCore(instance, descriptor.IterationSetupMethod, FallbackSignature, 1);
-
-        /// <summary>Creates global cleanup benchmark action.</summary>
-        /// <param name="descriptor">Descriptor info.</param>
-        /// <param name="instance">Instance of target.</param>
-        /// <returns>Cleanup benchmark action.</returns>
-        public static BenchmarkAction CreateIterationCleanup(Descriptor descriptor, object instance) =>
-            CreateCore(instance, descriptor.IterationCleanupMethod, FallbackSignature, 1);
-
-        /// <summary>Creates a dummy benchmark action.</summary>
-        /// <returns>Dummy benchmark action.</returns>
-        public static BenchmarkAction CreateDummy() =>
-            CreateCore(new DummyInstance(), DummyMethod, null, 1);
+        return Create(
+            typeof(BenchmarkAction<>).MakeGenericType(resultType),
+            resultInstance,
+            targetMethod,
+            unrollFactor);
     }
+
+    private static void PrepareInstanceAndResultType(object instance, MethodInfo targetMethod, out object? resultInstance, out Type resultType)
+    {
+        resultInstance = targetMethod.IsStatic ? null : instance;
+        resultType = targetMethod.ReturnType;
+
+        if (resultType == typeof(void))
+        {
+            // DONTTOUCH: async should be checked for target method
+            // as fallbackIdleSignature used for result type detection only.
+            bool isUsingAsyncKeyword = targetMethod?.HasAttribute<AsyncStateMachineAttribute>() ?? false;
+            if (isUsingAsyncKeyword)
+                throw new NotSupportedException("Async void is not supported by design.");
+        }
+        else if (resultType.IsPointer && resultType != typeof(void*))
+        {
+            throw new NotSupportedException($"Default {nameof(BenchmarkActionFactory)} only supports void* return, not T*");
+        }
+    }
+
+    /// <summary>Helper to enforce .ctor signature.</summary>
+    private static BenchmarkActionBase Create(Type actionType, object? instance, MethodInfo method, int unrollFactor) =>
+        (BenchmarkActionBase) Activator.CreateInstance(actionType, instance, method, unrollFactor)!;
+
+    private static readonly MethodInfo FallbackSignature = new Action(BenchmarkActionBase.OverheadStatic).GetMethodInfo();
+
+    public static IBenchmarkAction CreateWorkload(IBenchmarkActionFactory? factory, Descriptor descriptor, object instance, int unrollFactor, bool consumeTasksSynchronously = false) =>
+        CreateCore(factory, instance, descriptor.WorkloadMethod, unrollFactor, consumeTasksSynchronously);
+
+    public static IBenchmarkAction CreateOverhead(IBenchmarkActionFactory? factory, Descriptor descriptor, object instance, int unrollFactor) =>
+        CreateCore(factory, instance, FallbackSignature, unrollFactor);
+
+    public static IBenchmarkAction CreateGlobalSetup(IBenchmarkActionFactory? factory, Descriptor descriptor, object instance) =>
+        CreateCore(factory, instance, descriptor.GlobalSetupMethod ?? FallbackSignature, 1);
+
+    public static IBenchmarkAction CreateGlobalCleanup(IBenchmarkActionFactory? factory, Descriptor descriptor, object instance) =>
+        CreateCore(factory, instance, descriptor.GlobalCleanupMethod ?? FallbackSignature, 1);
+
+    public static IBenchmarkAction CreateIterationSetup(IBenchmarkActionFactory? factory, Descriptor descriptor, object instance) =>
+        CreateCore(factory, instance, descriptor.IterationSetupMethod ?? FallbackSignature, 1);
+
+    public static IBenchmarkAction CreateIterationCleanup(IBenchmarkActionFactory? factory, Descriptor descriptor, object instance) =>
+        CreateCore(factory, instance, descriptor.IterationCleanupMethod ?? FallbackSignature, 1);
 }

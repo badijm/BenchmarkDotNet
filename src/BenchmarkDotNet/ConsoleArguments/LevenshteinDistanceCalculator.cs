@@ -1,5 +1,3 @@
-﻿using System;
-
 namespace BenchmarkDotNet.ConsoleArguments
 {
     internal class LevenshteinDistanceCalculator

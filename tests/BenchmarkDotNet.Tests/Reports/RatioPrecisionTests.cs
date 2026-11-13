@@ -1,7 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
@@ -11,11 +7,10 @@ using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Builders;
+using BenchmarkDotNet.Tests.Helpers;
 using BenchmarkDotNet.Toolchains;
 using BenchmarkDotNet.Toolchains.Results;
-using BenchmarkDotNet.Validators;
-using Xunit;
-using Xunit.Abstractions;
+using System.Collections.Immutable;
 
 namespace BenchmarkDotNet.Tests.Reports
 {
@@ -48,7 +43,7 @@ namespace BenchmarkDotNet.Tests.Reports
         {
             if (value.Contains('.'))
             {
-                Assert.Equal((1 / (double)baseLineValues[0]) < 0.01 ? 3 : 2, value.Split('.')[1].Length);
+                Assert.Equal((1 / (double) baseLineValues[0]) < 0.01 ? 3 : 2, value.Split('.')[1].Length);
             }
         }
 
@@ -72,16 +67,16 @@ namespace BenchmarkDotNet.Tests.Reports
                 string.Empty,
                 TimeSpan.FromMinutes(1),
                 TestCultureInfo.Instance,
-                ImmutableArray<ValidationError>.Empty,
-                ImmutableArray<IColumnHidingRule>.Empty);
-            MarkdownExporter.Default.ExportToLog(summary, logger);
+                [],
+                []);
+            ((ExporterBase) MarkdownExporter.Default).ExportToLogAsync(summary, logger, CancellationToken.None).AsTask().GetAwaiter().GetResult();
             output.WriteLine(logger.GetLog());
             return summary;
         }
 
         private static BenchmarkReport CreateReport(BenchmarkCase benchmarkCase, int measurementValue)
         {
-            var buildResult = BuildResult.Success(GenerateResult.Success(ArtifactsPaths.Empty, Array.Empty<string>()));
+            var buildResult = BuildResult.Success(ArtifactsPaths.Empty);
             var measurements = new List<Measurement>
                 {
                     new Measurement(1, IterationMode.Workload, IterationStage.Result, 1, 1, measurementValue),
@@ -91,8 +86,8 @@ namespace BenchmarkDotNet.Tests.Reports
                     new Measurement(1, IterationMode.Workload, IterationStage.Result, 5, 1, measurementValue),
                     new Measurement(1, IterationMode.Workload, IterationStage.Result, 6, 1, measurementValue),
                 };
-            var executeResult = new ExecuteResult(measurements, default, default, 0);
-            return new BenchmarkReport(true, benchmarkCase, buildResult, buildResult, new List<ExecuteResult> { executeResult }, Array.Empty<Metric>());
+            var executeResult = new ExecuteResult(measurements, default);
+            return new BenchmarkReport(true, benchmarkCase, buildResult, [executeResult], []);
         }
 
         private static IEnumerable<BenchmarkCase> CreateBenchmarks(IConfig config) =>

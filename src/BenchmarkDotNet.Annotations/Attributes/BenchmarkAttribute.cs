@@ -1,6 +1,5 @@
-﻿using System;
-using System.Runtime.CompilerServices;
 using JetBrains.Annotations;
+using System.Runtime.CompilerServices;
 
 namespace BenchmarkDotNet.Attributes
 {
@@ -14,7 +13,7 @@ namespace BenchmarkDotNet.Attributes
             SourceCodeFile = sourceCodeFile;
         }
 
-        public string Description { get; set; }
+        public string? Description { get; set; }
 
         public bool Baseline { get; set; }
 

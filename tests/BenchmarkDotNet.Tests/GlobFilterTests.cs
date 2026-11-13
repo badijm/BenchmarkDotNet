@@ -1,10 +1,6 @@
-﻿using System.Linq;
-using System.Threading;
-using ApprovalUtilities.Utilities;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Filters;
 using BenchmarkDotNet.Running;
-using Xunit;
 
 namespace BenchmarkDotNet.Tests
 {
@@ -22,9 +18,9 @@ namespace BenchmarkDotNet.Tests
         [InlineData("*stillWRONG*", false)]
         public void TheFilterIsCaseInsensitive(string pattern, bool expected)
         {
-            var benchmarkCase  = BenchmarkConverter.TypeToBenchmarks(typeof(TypeWithBenchmarks)).BenchmarksCases.Single();
+            var benchmarkCase = BenchmarkConverter.TypeToBenchmarks(typeof(TypeWithBenchmarks)).BenchmarksCases.Single();
 
-            var filter = new GlobFilter(new[] { pattern });
+            var filter = new GlobFilter([pattern]);
 
             Assert.Equal(expected, filter.Predicate(benchmarkCase));
         }
@@ -45,7 +41,7 @@ namespace BenchmarkDotNet.Tests
         {
             var benchmarkCases = BenchmarkConverter.TypeToBenchmarks(typeof(TypeWithBenchmarksAndParams)).BenchmarksCases;
 
-            var filter = new GlobFilter(new[] { pattern });
+            var filter = new GlobFilter([pattern]);
 
             Assert.Equal(expectedBenchmarks, benchmarkCases.Where(benchmarkCase => filter.Predicate(benchmarkCase)).Count());
         }

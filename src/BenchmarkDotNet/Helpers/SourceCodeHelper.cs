@@ -1,18 +1,27 @@
-﻿using System;
+using BenchmarkDotNet.Extensions;
+using Perfolizer.Horology;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Numerics;
-using BenchmarkDotNet.Extensions;
-using Perfolizer.Horology;
-using SimpleJson.Reflection;
 
 namespace BenchmarkDotNet.Helpers
 {
     public static class SourceCodeHelper
     {
-        public static string ToSourceCode(object value)
+        /// <summary>
+        /// Renders a value as a C# expression, using <paramref name="declaredType"/> to disambiguate the value.
+        /// An enum declared in F# is erased to its underlying type in attribute metadata, so the value alone
+        /// would render as a plain number (dotnet/fsharp#995).
+        /// </summary>
+        public static string ToSourceCode(object? value, Type declaredType)
+            => value != null && declaredType.IsEnum && !value.GetType().IsEnum
+                ? ToSourceCode(Enum.ToObject(declaredType, value))
+                : ToSourceCode(value);
+
+        public static string ToSourceCode(object? value)
         {
-            switch (value) {
+            switch (value)
+            {
                 case null:
                     return "null";
                 case bool b:
@@ -33,15 +42,28 @@ namespace BenchmarkDotNet.Helpers
                     return $"System.DateTime.Parse(\"{dateTime.ToString(CultureInfo.InvariantCulture)}\", System.Globalization.CultureInfo.InvariantCulture)";
                 case Guid guid:
                     return $"System.Guid.Parse(\"{guid.ToString()}\")";
+                // Multi-dimensional arrays are more complex, we only need single-dimension support for now.
+                case Array { Rank: 1 } array:
+                    {
+                        var elementsSourceCode = new string[array.Length];
+                        for (int i = 0; i < array.Length; ++i)
+                        {
+                            elementsSourceCode[i] = ToSourceCode(array.GetValue(i));
+                        }
+                        return $"new {array.GetType().GetElementType()!.GetCorrectCSharpTypeName()}[] {{ {string.Join(", ", elementsSourceCode)} }}";
+                    }
             }
-            if (ReflectionUtils.GetTypeInfo(value.GetType()).IsEnum)
-                return $"({value.GetType().GetCorrectCSharpTypeName()})({ToInvariantCultureString(value)})";
+
+            var valueType = value.GetType();
+            if (valueType.IsEnum)
+                return $"({valueType.GetCorrectCSharpTypeName()})({ToInvariantCultureString(value)})";
             if (value is Type type)
                 return "typeof(" + type.GetCorrectCSharpTypeName() + ")";
-            if (!ReflectionUtils.GetTypeInfo(value.GetType()).IsValueType)
-                return "System.Activator.CreateInstance<" + value.GetType().GetCorrectCSharpTypeName() + ">()";
+            if (!valueType.IsValueType)
+                return "System.Activator.CreateInstance<" + valueType.GetCorrectCSharpTypeName() + ">()";
 
-            switch (value) {
+            switch (value)
+            {
                 case TimeInterval interval:
                     return "new Perfolizer.Horology.TimeInterval(" + ToSourceCode(interval.Nanoseconds) + ")";
                 case IntPtr ptr:
@@ -50,10 +72,10 @@ namespace BenchmarkDotNet.Helpers
                     return formattable.ToString(null, CultureInfo.InvariantCulture);
             }
 
-            return value.ToString();
+            return value.ToString()!;
         }
 
-        public static bool IsCompilationTimeConstant(object value)
+        public static bool IsCompilationTimeConstant(object? value)
             => value == null || IsCompilationTimeConstant(value.GetType());
 
         public static bool IsCompilationTimeConstant(Type type)
@@ -139,21 +161,21 @@ namespace BenchmarkDotNet.Helpers
             switch (Type.GetTypeCode(Enum.GetUnderlyingType(@enum.GetType())))
             {
                 case TypeCode.Byte:
-                    return ((byte)@enum).ToString(CultureInfo.InvariantCulture);
+                    return ((byte) @enum).ToString(CultureInfo.InvariantCulture);
                 case TypeCode.Int16:
-                    return ((short)@enum).ToString(CultureInfo.InvariantCulture);
+                    return ((short) @enum).ToString(CultureInfo.InvariantCulture);
                 case TypeCode.Int32:
-                    return ((int)@enum).ToString(CultureInfo.InvariantCulture);
+                    return ((int) @enum).ToString(CultureInfo.InvariantCulture);
                 case TypeCode.Int64:
-                    return ((long)@enum).ToString(CultureInfo.InvariantCulture);
+                    return ((long) @enum).ToString(CultureInfo.InvariantCulture);
                 case TypeCode.SByte:
-                    return ((sbyte)@enum).ToString(CultureInfo.InvariantCulture);
+                    return ((sbyte) @enum).ToString(CultureInfo.InvariantCulture);
                 case TypeCode.UInt16:
-                    return ((ushort)@enum).ToString(CultureInfo.InvariantCulture);
+                    return ((ushort) @enum).ToString(CultureInfo.InvariantCulture);
                 case TypeCode.UInt32:
-                    return ((uint)@enum).ToString(CultureInfo.InvariantCulture);
+                    return ((uint) @enum).ToString(CultureInfo.InvariantCulture);
                 case TypeCode.UInt64:
-                    return ((ulong)@enum).ToString(CultureInfo.InvariantCulture);
+                    return ((ulong) @enum).ToString(CultureInfo.InvariantCulture);
                 default:
                     throw new ArgumentOutOfRangeException(nameof(@enum));
             }

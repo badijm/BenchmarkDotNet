@@ -1,7 +1,7 @@
-﻿using System.Diagnostics.CodeAnalysis;
 using BenchmarkDotNet.Characteristics;
 using Perfolizer.Horology;
 using Perfolizer.Mathematics.OutlierDetection;
+using System.Diagnostics.CodeAnalysis;
 
 namespace BenchmarkDotNet.Jobs
 {
@@ -59,8 +59,8 @@ namespace BenchmarkDotNet.Jobs
         }
 
         /// <summary>
-        /// Specifies if the overhead should be evaluated (Idle runs) and it's average value subtracted from every result.
-        /// True by default, very important for nano-benchmarks.
+        /// Specifies whether the overhead should be run and evaluated and its average value subtracted from every result.
+        /// False by default.
         /// </summary>
         public bool EvaluateOverhead
         {

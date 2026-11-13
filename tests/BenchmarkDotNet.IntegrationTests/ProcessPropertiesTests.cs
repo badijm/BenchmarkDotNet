@@ -1,12 +1,10 @@
-﻿using System;
-using System.Diagnostics;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Tests.Loggers;
 using BenchmarkDotNet.Tests.XUnit;
-using Xunit.Abstractions;
+using System.Diagnostics;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -17,13 +15,13 @@ namespace BenchmarkDotNet.IntegrationTests
         {
         }
 
-        [FactWindowsOnly("Process.set_PriorityClass requires root on Unix")]
+        [FactEnvSpecific("Process.set_PriorityClass requires root on Unix", EnvRequirement.WindowsOnly)]
         public void HighPriorityIsSet()
         {
             CanExecute<HighPriority>();
         }
 
-        [FactWindowsOnly("Process.set_ProcessorAffinity requires root on Unix")]
+        [FactEnvSpecific("Process.set_ProcessorAffinity requires root on Unix", EnvRequirement.WindowsOnly)]
         public void CustomAffinityCanBeSet()
         {
             var config = ManualConfig.CreateEmpty()

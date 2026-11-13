@@ -1,5 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
-using System;
+using BenchmarkDotNet.Attributes;
 
 namespace BenchmarkDotNet.Samples
 {
@@ -8,23 +7,23 @@ namespace BenchmarkDotNet.Samples
         [Params(512 * 4)]
         public int Size;
 
-        private int[] _array;
-        private int[] _destination;
+        private int[] array = default!;
+        private int[] destination = default!;
 
         [GlobalSetup]
         public void Setup()
         {
-            _array = new int[Size];
-            _destination = new int[Size];
+            array = new int[Size];
+            destination = new int[Size];
         }
 
         [Benchmark]
         [MemoryRandomization(false)]
-        public void Array_RandomizationDisabled() => Array.Copy(_array, _destination, Size);
+        public void Array_RandomizationDisabled() => Array.Copy(array, destination, Size);
 
         [Benchmark]
         [MemoryRandomization(true)]
         [MaxIterationCount(40)] // the benchmark becomes multimodal and need a lower limit of max iterations than the default
-        public void Array_RandomizationEnabled() => Array.Copy(_array, _destination, Size);
+        public void Array_RandomizationEnabled() => Array.Copy(array, destination, Size);
     }
 }

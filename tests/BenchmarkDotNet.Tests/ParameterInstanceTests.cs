@@ -1,14 +1,11 @@
-﻿using BenchmarkDotNet.Parameters;
+using BenchmarkDotNet.Parameters;
 using BenchmarkDotNet.Reports;
-using System;
-using System.Collections.Generic;
-using Xunit;
 
 namespace BenchmarkDotNet.Tests
 {
     public class ParameterInstanceTests
     {
-        private static readonly ParameterDefinition definition = new ParameterDefinition("Testing", isStatic: false, values: Array.Empty<object>(), isArgument: false, parameterType: null, 0);
+        private static readonly ParameterDefinition definition = new ParameterDefinition("Testing", isStatic: false, isArgument: false, parameterType: typeof(object), 0);
 
         [Theory]
         [InlineData(5)]

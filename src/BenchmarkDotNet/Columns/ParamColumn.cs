@@ -1,4 +1,3 @@
-﻿using System.Linq;
 using BenchmarkDotNet.Parameters;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;

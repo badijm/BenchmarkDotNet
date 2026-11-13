@@ -1,10 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Extensions;
 using JetBrains.Annotations;
 using Perfolizer.Horology;
+using Perfolizer.Metrology;
 
 namespace BenchmarkDotNet.Reports
 {
@@ -24,40 +22,46 @@ namespace BenchmarkDotNet.Reports
         public SummaryStyle EffectiveSummaryStyle { get; }
         public bool SeparateLogicalGroups { get; }
 
-        internal SummaryTable(Summary summary, SummaryStyle style = null)
+        internal SummaryTable(Summary summary, SummaryStyle? style = null)
         {
             Summary = summary;
 
             if (summary.HasCriticalValidationErrors)
             {
-                Columns = Array.Empty<SummaryTableColumn>();
+                Columns = [];
                 ColumnCount = 0;
-                FullHeader = Array.Empty<string>();
-                FullContent = Array.Empty<string[]>();
-                FullContentStartOfHighlightGroup = Array.Empty<bool>();
-                FullContentWithHeader = Array.Empty<string[]>();
-                IsDefault = Array.Empty<bool>();
+                FullHeader = [];
+                FullContent = [];
+                FullContentStartOfHighlightGroup = [];
+                FullContentStartOfLogicalGroup = [];
+                FullContentWithHeader = [];
+                IsDefault = [];
+                EffectiveSummaryStyle = summary.Style;
                 return;
             }
 
             // Ensure we have all required data for styling
-            style = style ?? summary.Style ?? SummaryStyle.Default;
+            style = style ?? summary.Style;
             if (style.TimeUnit == null)
             {
-                style = style.WithTimeUnit(TimeUnit.GetBestTimeUnit(summary.Reports.Where(r => r.ResultStatistics != null).Select(r => r.ResultStatistics.Mean)
+                style = style.WithTimeUnit(TimeUnit.GetBestTimeUnit(summary.Reports.Where(r => r.ResultStatistics != null).Select(r => r.ResultStatistics!.Mean)
                     .ToArray()));
             }
 
             if (style.SizeUnit == null)
             {
-                style = style.WithSizeUnit(SizeUnit.GetBestSizeUnit(summary.Reports.Select(r => r.GcStats.GetBytesAllocatedPerOperation(r.BenchmarkCase)).ToArray()));
+                style = style.WithSizeUnit(SizeUnit.GetBestSizeUnit(summary.Reports
+                    .Where(r => r.GcStats.GetBytesAllocatedPerOperation(r.BenchmarkCase).HasValue)
+                    .Select(r => r.GcStats.GetBytesAllocatedPerOperation(r.BenchmarkCase)!.Value)
+                    .ToArray()));
             }
+            EffectiveSummaryStyle = style!;
 
             var columns = summary.GetColumns();
             ColumnCount = columns.Length;
             FullHeader = columns.Select(c => c.GetColumnTitle(style)).ToArray();
 
-            FullContent = summary.Reports.Select(r => columns.Select(c => c.GetValue(summary, r.BenchmarkCase, style)).ToArray()).ToArray();
+            FullContent = summary.Reports.Select(r => columns.Select(c => c.GetValue(summary, r.BenchmarkCase, style) ?? "NA").ToArray()).ToArray();
             IsDefault = columns.Select(c => summary.Reports.All(r => c.IsDefault(summary, r.BenchmarkCase))).ToArray();
 
             var highlightGroupKeys = summary.BenchmarksCases.Select(b => b.Config.Orderer.GetHighlightGroupKey(b)).ToArray();
@@ -93,8 +97,6 @@ namespace BenchmarkDotNet.Reports
                 bool hide = summary.ColumnHidingRules.Any(rule => rule.NeedToHide(column));
                 Columns[i] = new SummaryTableColumn(this, i, column, hide);
             }
-
-            EffectiveSummaryStyle = style;
         }
 
         public class SummaryTableColumn
@@ -116,11 +118,11 @@ namespace BenchmarkDotNet.Reports
                 Index = index;
                 Header = table.FullHeader[index];
                 Content = table.FullContent.Select(line => line[index]).ToArray();
-                Width = Math.Max(Header.Length, Content.Any() ? Content.Max(line => line.Length) : 0) + 1;
+                Width = Math.Max(Header.Length, Content.Length != 0 ? Content.Max(line => line.Length) : 0) + 1;
                 IsDefault = table.IsDefault[index];
                 OriginalColumn = column;
 
-                Justify = column.IsNumeric ? TextJustification.Right : TextJustification.Left;
+                Justify = column.IsNumeric ? table.EffectiveSummaryStyle.NumericColumnJustification : table.EffectiveSummaryStyle.TextColumnJustification;
 
                 bool needToShow = column.AlwaysShow || Content.Distinct().Count() > 1;
                 NeedToShow = !hide && needToShow;

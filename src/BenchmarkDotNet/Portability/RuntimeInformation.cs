@@ -1,21 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Linq;
-using System.Management;
-using System.Numerics;
-using System.Reflection;
-using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Helpers;
-using BenchmarkDotNet.Portability.Cpu;
-using JetBrains.Annotations;
 using Microsoft.Win32;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
+using System.Text.Json;
 using static System.Runtime.InteropServices.RuntimeInformation;
-using RuntimeEnvironment = Microsoft.DotNet.PlatformAbstractions.RuntimeEnvironment;
 
 namespace BenchmarkDotNet.Portability
 {
@@ -25,202 +19,89 @@ namespace BenchmarkDotNet.Portability
         internal const string ReleaseConfigurationName = "RELEASE";
         internal const string Unknown = "?";
 
+        // Many of these checks allocate and/or are expensive to compute. We store the results in static readonly fields to keep Engine non-allocating.
+        // Static readonly fields are used instead of properties to avoid an extra getter method call that might not be tier1 jitted.
+        // This class is internal, so we don't need to expose these as properties.
+
         /// <summary>
         /// returns true for both the old (implementation of .NET Framework) and new Mono (.NET 6+ flavour)
         /// </summary>
-        public static bool IsMono { get; } = Type.GetType("Mono.RuntimeStructs") != null; // it allocates a lot of memory, we need to check it once in order to keep Engine non-allocating!
+        public static readonly bool IsMono = Type.GetType("Mono.RuntimeStructs") != null;
 
-        public static bool IsOldMono { get; } = Type.GetType("Mono.Runtime") != null;
+        public static readonly bool IsOldMono = Type.GetType("Mono.Runtime") != null;
 
-        public static bool IsNewMono { get; } = IsMono && !IsOldMono;
+        public static readonly bool IsNewMono = IsMono && !IsOldMono;
 
-        public static bool IsFullFramework =>
+        public static readonly bool IsFullFramework =
 #if NET6_0_OR_GREATER
+            // This could be const, but we want to avoid unreachable code warnings.
             false;
 #else
             FrameworkDescription.StartsWith(".NET Framework", StringComparison.OrdinalIgnoreCase);
 #endif
 
-        [PublicAPI]
-        public static bool IsNetNative => FrameworkDescription.StartsWith(".NET Native", StringComparison.OrdinalIgnoreCase);
-
-        public static bool IsNetCore
-            => ((Environment.Version.Major >= 5) || FrameworkDescription.StartsWith(".NET Core", StringComparison.OrdinalIgnoreCase))
-                && !string.IsNullOrEmpty(typeof(object).Assembly.Location);
-
-        public static bool IsNativeAOT
-            => Environment.Version.Major >= 5
-                && string.IsNullOrEmpty(typeof(object).Assembly.Location) // it's merged to a single .exe and .Location returns null
-                && !IsWasm; // Wasm also returns "" for assembly locations
-
+        [SupportedOSPlatformGuard("browser")]
 #if NET6_0_OR_GREATER
-        [System.Runtime.Versioning.SupportedOSPlatformGuard("browser")]
-#endif
-        public static bool IsWasm =>
-#if NET6_0_OR_GREATER
-            OperatingSystem.IsBrowser();
+        public static readonly bool IsWasm = OperatingSystem.IsBrowser();
 #else
-            IsOSPlatform(OSPlatform.Create("BROWSER"));
+        public static readonly bool IsWasm = IsOSPlatform(OSPlatform.Create("BROWSER"));
 #endif
 
 #if NETSTANDARD2_0
-        public static bool IsAot { get; } = IsAotMethod(); // This allocates, so we only want to call it once statically.
+        public static readonly bool IsAot = GetIsAot();
 
-        private static bool IsAotMethod()
+        private static bool GetIsAot()
         {
             Type runtimeFeature = Type.GetType("System.Runtime.CompilerServices.RuntimeFeature");
             if (runtimeFeature != null)
             {
-                MethodInfo methodInfo = runtimeFeature.GetProperty("IsDynamicCodeCompiled", BindingFlags.Public | BindingFlags.Static)?.GetMethod;
+                MethodInfo? methodInfo = runtimeFeature.GetProperty("IsDynamicCodeCompiled", BindingFlags.Public | BindingFlags.Static)?.GetMethod;
 
                 if (methodInfo != null)
                 {
-                    return !(bool)methodInfo.Invoke(null, null);
+                    return !(bool) methodInfo.Invoke(null, null);
                 }
             }
 
-            return false;
+            if (FrameworkDescription.StartsWith(".NET Native", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            // Fallback for old runtimes like legacy MonoAot, test if dynamic method works.
+            try
+            {
+                _ = new System.Reflection.Emit.DynamicMethod("test", typeof(void), []);
+                return false;
+            }
+            catch
+            {
+                return true;
+            }
         }
 #else
-        public static bool IsAot => !System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeCompiled;
+        public static readonly bool IsAot = !System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeCompiled;
 #endif
 
-        public static bool IsRunningInContainer => string.Equals(Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"), "true");
+        public static bool IsNetCore
+            => ((Environment.Version.Major >= 5) || FrameworkDescription.StartsWith(".NET Core", StringComparison.OrdinalIgnoreCase))
+                && !IsAot;
 
-        internal static string ExecutableExtension => IsWindows() ? ".exe" : string.Empty;
+        public static bool IsNativeAOT
+            => Environment.Version.Major >= 5
+               && IsAot
+               && !IsWasm && !IsMono; // Wasm and Mono AOT are also AOT
 
-        internal static string ScriptFileExtension => IsWindows() ? ".bat" : ".sh";
+        public static readonly bool IsRunningInContainer = string.Equals(Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER"), "true");
 
         internal static string GetArchitecture() => GetCurrentPlatform().ToString();
-
-#if NET6_0_OR_GREATER
-        [System.Runtime.Versioning.SupportedOSPlatformGuard("windows")]
-#endif
-        internal static bool IsWindows() =>
-#if NET6_0_OR_GREATER
-            OperatingSystem.IsWindows(); // prefer linker-friendly OperatingSystem APIs
-#else
-            IsOSPlatform(OSPlatform.Windows);
-#endif
-
-#if NET6_0_OR_GREATER
-        [System.Runtime.Versioning.SupportedOSPlatformGuard("linux")]
-#endif
-        internal static bool IsLinux() =>
-#if NET6_0_OR_GREATER
-            OperatingSystem.IsLinux();
-#else
-            IsOSPlatform(OSPlatform.Linux);
-#endif
-
-#if NET6_0_OR_GREATER
-        [System.Runtime.Versioning.SupportedOSPlatformGuard("macos")]
-#endif
-        internal static bool IsMacOS() =>
-#if NET6_0_OR_GREATER
-            OperatingSystem.IsMacOS();
-#else
-            IsOSPlatform(OSPlatform.OSX);
-#endif
-
-#if NET6_0_OR_GREATER
-        [System.Runtime.Versioning.SupportedOSPlatformGuard("android")]
-#endif
-        internal static bool IsAndroid() =>
-#if NET6_0_OR_GREATER
-            OperatingSystem.IsAndroid();
-#else
-            Type.GetType("Java.Lang.Object, Mono.Android") != null;
-#endif
-
-#if NET6_0_OR_GREATER
-        [System.Runtime.Versioning.SupportedOSPlatformGuard("ios")]
-#endif
-        internal static bool IsIOS() =>
-#if NET6_0_OR_GREATER
-            OperatingSystem.IsIOS();
-#else
-            Type.GetType("Foundation.NSObject, Xamarin.iOS") != null;
-#endif
-
-#if NET6_0_OR_GREATER
-        [System.Runtime.Versioning.SupportedOSPlatformGuard("tvos")]
-#endif
-        internal static bool IsTvOS() =>
-#if NET6_0_OR_GREATER
-            OperatingSystem.IsTvOS();
-#else
-            IsOSPlatform(OSPlatform.Create("TVOS"));
-#endif
-
-        public static string GetOsVersion()
-        {
-            if (IsMacOS())
-            {
-                string systemVersion = ExternalToolsHelper.MacSystemProfilerData.Value.GetValueOrDefault("System Version") ?? "";
-                string kernelVersion = ExternalToolsHelper.MacSystemProfilerData.Value.GetValueOrDefault("Kernel Version") ?? "";
-                if (!string.IsNullOrEmpty(systemVersion) && !string.IsNullOrEmpty(kernelVersion))
-                    return OsBrandStringHelper.PrettifyMacOSX(systemVersion, kernelVersion);
-            }
-
-            string operatingSystem = RuntimeEnvironment.OperatingSystem;
-            string operatingSystemVersion = RuntimeEnvironment.OperatingSystemVersion;
-
-            return OsBrandStringHelper.Prettify(
-                operatingSystem,
-                operatingSystemVersion,
-                GetWindowsUbr());
-        }
-
-        // TODO: Introduce a common util API for registry calls, use it also in BenchmarkDotNet.Toolchains.CsProj.GetCurrentVersionBasedOnWindowsRegistry
-        /// <summary>
-        /// On Windows, this method returns UBR (Update Build Revision) based on Registry.
-        /// Returns null if the value is not available
-        /// </summary>
-        /// <returns></returns>
-        private static int? GetWindowsUbr()
-        {
-            if (IsWindows())
-            {
-                try
-                {
-                    using (var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry32))
-                    using (var ndpKey = baseKey.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion"))
-                    {
-                        if (ndpKey == null)
-                            return null;
-
-                        return Convert.ToInt32(ndpKey.GetValue("UBR"));
-                    }
-                }
-                catch (Exception)
-                {
-                    return null;
-                }
-            }
-            return null;
-        }
-
-        internal static CpuInfo GetCpuInfo()
-        {
-            if (IsWindows() && IsFullFramework && !IsMono)
-                return MosCpuInfoProvider.MosCpuInfo.Value;
-            if (IsWindows())
-                return WmicCpuInfoProvider.WmicCpuInfo.Value;
-            if (IsLinux())
-                return ProcCpuInfoProvider.ProcCpuInfo.Value;
-            if (IsMacOS())
-                return SysctlCpuInfoProvider.SysctlCpuInfo.Value;
-
-            return null;
-        }
 
         internal static string GetRuntimeVersion()
         {
             if (IsWasm)
             {
                 // code copied from https://github.com/dotnet/runtime/blob/2c573b59aaaf3fd17e2ecab95ad3769f195d2dbc/src/libraries/System.Runtime.InteropServices.RuntimeInformation/src/System/Runtime/InteropServices/RuntimeInformation/RuntimeInformation.cs#L20-L30
-                string versionString = typeof(object).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+                string? versionString = typeof(object).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 
                 // Strip the git hash if there is one
                 if (versionString != null)
@@ -232,7 +113,8 @@ namespace BenchmarkDotNet.Portability
                     }
                 }
 
-                return $".NET Core (Mono) {versionString}";
+                string runtimeName = IsMono ? "Mono" : "CoreCLR";
+                return $".NET Core ({runtimeName}) {versionString}";
             }
             else if (IsOldMono)
             {
@@ -240,14 +122,14 @@ namespace BenchmarkDotNet.Portability
                 var monoDisplayName = monoRuntimeType?.GetMethod("GetDisplayName", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
                 if (monoDisplayName != null)
                 {
-                    string version = monoDisplayName.Invoke(null, null)?.ToString();
+                    string? version = monoDisplayName.Invoke(null, null)?.ToString();
                     if (version != null)
                     {
                         int bracket1 = version.IndexOf('('), bracket2 = version.IndexOf(')');
                         if (bracket1 != -1 && bracket2 != -1)
                         {
                             string comment = version.Substring(bracket1 + 1, bracket2 - bracket1 - 1);
-                            var commentParts = comment.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                            var commentParts = comment.Split([' '], StringSplitOptions.RemoveEmptyEntries);
                             if (commentParts.Length > 2)
                                 version = version.Substring(0, bracket1) + "(" + commentParts[0] + " " + commentParts[1] + ")";
                         }
@@ -278,42 +160,52 @@ namespace BenchmarkDotNet.Portability
 
         private static string GetNetCoreVersion()
         {
-            if (IsAndroid())
+            if (OsDetector.IsAndroid())
             {
                 return $".NET {Environment.Version}";
             }
-            else
+
+            return CoreRuntime.TryGetVersion(out var version) && version.Major >= 5
+                ? $".NET {version} ({GetDetailedVersion()})"
+                : $".NET Core {version?.ToString() ?? Unknown} ({GetDetailedVersion()})";
+
+            string GetDetailedVersion()
             {
-                var coreclrAssemblyInfo = FileVersionInfo.GetVersionInfo(typeof(object).GetTypeInfo().Assembly.Location);
-                var corefxAssemblyInfo = FileVersionInfo.GetVersionInfo(typeof(Regex).GetTypeInfo().Assembly.Location);
-
-                if (CoreRuntime.TryGetVersion(out var version) && version >= new Version(5, 0))
-                {
-                    // after the merge of dotnet/corefx and dotnet/coreclr into dotnet/runtime the version should always be the same
-                    Debug.Assert(coreclrAssemblyInfo.FileVersion == corefxAssemblyInfo.FileVersion);
-
-                    return $".NET {version} ({coreclrAssemblyInfo.FileVersion})";
-                }
-                else
-                {
-                    string runtimeVersion = version != default ? version.ToString() : "?";
-
-                    return $".NET Core {runtimeVersion} (CoreCLR {coreclrAssemblyInfo.FileVersion}, CoreFX {corefxAssemblyInfo.FileVersion})";
-                }
+                // Single-file publish and NativeAot app have empty assembly location.
+                string coreclrLocation = GetCoreLibDllLocation();
+                if (coreclrLocation.IsBlank())
+                    return CoreRuntime.GetVersionFromFrameworkDescription();
+                // .Net Core 2.X has confusing FrameworkDescription like 4.6.X.
+                if (version?.Major >= 3)
+                    return $"{CoreRuntime.GetVersionFromFrameworkDescription()}, {FileVersionInfo.GetVersionInfo(coreclrLocation).FileVersion}";
+                return FileVersionInfo.GetVersionInfo(coreclrLocation).FileVersion!;
             }
+        }
+
+        internal static Runtime GetTargetOrCurrentRuntime(Assembly? assembly)
+        {
+            // Match order of checks in GetCurrentRuntime().
+            if (!IsMono && !IsWasm)
+            {
+                if (IsFullFramework)
+                    return ClrRuntime.GetTargetOrCurrentVersion(assembly);
+                // 99% of the time the core runtime is the same as the target framework, but the runtime could roll forward if it's not self-contained.
+                if (IsNetCore)
+                    return CoreRuntime.GetTargetOrCurrentVersion(assembly);
+            }
+            return GetCurrentRuntime();
         }
 
         internal static Runtime GetCurrentRuntime()
         {
             //do not change the order of conditions because it may cause incorrect determination of runtime
-            if (IsAot && IsMono)
-                return MonoAotLLVMRuntime.Default;
             if (IsWasm)
-                return WasmRuntime.Default;
+                return WasmRuntime.GetCurrentVersion();
             if (IsNewMono)
-                return MonoRuntime.GetCurrentVersion();
+                // New Mono AOT (MonoAotLLVM) has no official workload, it can only be built by custom runtime artifacts, we don't support it.
+                return MonoCoreRuntime.GetCurrentVersion();
             if (IsOldMono)
-                return MonoRuntime.Default;
+                return IsAot ? MonoAotRuntime.Default : MonoRuntime.Default;
             if (IsFullFramework)
                 return ClrRuntime.GetCurrentVersion();
             if (IsNetCore)
@@ -321,18 +213,19 @@ namespace BenchmarkDotNet.Portability
             if (IsNativeAOT)
                 return NativeAotRuntime.GetCurrentVersion();
 
-            throw new NotSupportedException("Unknown .NET Runtime");
+            return UnknownRuntime.Instance;
         }
 
         public static Platform GetCurrentPlatform()
         {
             // these are not part of .NET Standard 2.0, so we use hardcoded values taken from
-            // https://github.com/dotnet/runtime/blob/1a37caf773a3b857ccff49a31be3333d4fdc491f/src/libraries/System.Private.CoreLib/src/System/Runtime/InteropServices/Architecture.cs#L9
-            const Architecture Wasm = (Architecture)4;
-            const Architecture S390x = (Architecture)5;
-            const Architecture LoongArch64 = (Architecture)6;
-            const Architecture Armv6 = (Architecture)7;
-            const Architecture Ppc64le = (Architecture)8;
+            // https://github.com/dotnet/runtime/blob/080fcae7eaa8367abf7900e08ff2e52e3efea5bf/src/libraries/System.Private.CoreLib/src/System/Runtime/InteropServices/Architecture.cs#L9
+            const Architecture Wasm = (Architecture) 4;
+            const Architecture S390x = (Architecture) 5;
+            const Architecture LoongArch64 = (Architecture) 6;
+            const Architecture Armv6 = (Architecture) 7;
+            const Architecture Ppc64le = (Architecture) 8;
+            const Architecture RiscV64 = (Architecture) 9;
 
             switch (ProcessArchitecture)
             {
@@ -354,42 +247,14 @@ namespace BenchmarkDotNet.Portability
                     return Platform.Armv6;
                 case Ppc64le:
                     return Platform.Ppc64le;
+                case RiscV64:
+                    return Platform.RiscV64;
                 default:
                     throw new ArgumentOutOfRangeException();
             }
         }
 
         public static bool Is64BitPlatform() => IntPtr.Size == 8;
-
-        internal static bool HasRyuJit()
-        {
-            if (IsMono)
-                return false;
-            if (IsNetCore)
-                return true;
-
-            return Is64BitPlatform()
-                   && GetConfiguration() != DebugConfigurationName
-                   && !new JitHelper().IsMsX64();
-        }
-
-        internal static Jit GetCurrentJit() => HasRyuJit() ? Jit.RyuJit : Jit.LegacyJit;
-
-        internal static string GetJitInfo()
-        {
-            if (IsNativeAOT)
-                return "NativeAOT";
-            if (IsNetNative || IsAot)
-                return "AOT";
-            if (IsMono || IsWasm)
-                return ""; // There is no helpful information about JIT on Mono
-            if (IsNetCore || HasRyuJit()) // CoreCLR supports only RyuJIT
-                return "RyuJIT";
-            if (IsFullFramework)
-                return  "LegacyJIT";
-
-            return Unknown;
-        }
 
         internal static IntPtr GetCurrentAffinity() => Process.GetCurrentProcess().TryGetAffinity() ?? default;
 
@@ -403,96 +268,70 @@ namespace BenchmarkDotNet.Portability
             return isDebug.Value ? DebugConfigurationName : ReleaseConfigurationName;
         }
 
-        // See http://aakinshin.net/en/blog/dotnet/jit-version-determining-in-runtime/
-        private class JitHelper
-        {
-            [SuppressMessage("IDE0052", "IDE0052")]
-            [SuppressMessage("IDE0079", "IDE0079")]
-            [SuppressMessage("ReSharper", "NotAccessedField.Local")]
-            private int bar;
-
-            public bool IsMsX64(int step = 1)
-            {
-                int value = 0;
-                for (int i = 0; i < step; i++)
-                {
-                    bar = i + 10;
-                    for (int j = 0; j < 2 * step; j += step)
-                        value = j + 10;
-                }
-                return value == 20 + step;
-            }
-        }
-
-        private class JitModule
-        {
-            public string Name { get; }
-            public string Version { get; }
-
-            public JitModule(string name, string version)
-            {
-                Name = name;
-                Version = version;
-            }
-        }
-
         internal static ICollection<Antivirus> GetAntivirusProducts()
         {
-            var products = new List<Antivirus>();
-            if (IsWindows())
-            {
-                try
-                {
-                    using (var wmi = new ManagementObjectSearcher(@"root\SecurityCenter2", "SELECT * FROM AntiVirusProduct"))
-                    using (var data = wmi.Get())
-                        foreach (var o in data)
-                        {
-                            var av = (ManagementObject) o;
-                            if (av != null)
-                            {
-                                string name = av["displayName"].ToString();
-                                string path = av["pathToSignedProductExe"].ToString();
-                                products.Add(new Antivirus(name, path));
-                            }
-                        }
-                }
-                catch
-                {
-                    // Never mind
-                }
-            }
+            if (!OsDetector.IsWindows())
+                return [];
 
-            return products;
+            try
+            {
+                var command = "ConvertTo-Json @(Get-CimInstance -Namespace root/SecurityCenter2 -ClassName AntiVirusProduct | select displayName, pathToSignedProductExe)";
+
+                string? output = ProcessHelper.RunPowerShellCommandAndReadOutput(command);
+
+                if (output.IsBlank())
+                    return [];
+
+                var results = JsonSerializer.Deserialize<JsonElement[]>(output)!;
+                return results.Select(node =>
+                {
+                    string name = node.GetProperty("displayName").GetString()!;
+                    string path = node.GetProperty("pathToSignedProductExe").GetString()!;
+                    return new Antivirus(name, path);
+                }).ToList();
+            }
+            catch
+            {
+                // Never mind
+                return [];
+            }
         }
 
-        internal static VirtualMachineHypervisor GetVirtualMachineHypervisor()
+        internal static VirtualMachineHypervisor? GetVirtualMachineHypervisor()
         {
-            VirtualMachineHypervisor[] hypervisors = { HyperV.Default, VirtualBox.Default, VMware.Default };
+            if (!OsDetector.IsWindows())
+                return null;
 
-            if (IsWindows())
+            VirtualMachineHypervisor[] hypervisors = [HyperV.Default, VirtualBox.Default, VMware.Default];
+
+            try
             {
-                try
-                {
-                    using (var searcher = new ManagementObjectSearcher("Select * from Win32_ComputerSystem"))
-                    {
-                        using (var items = searcher.Get())
-                        {
-                            foreach (var item in items)
-                            {
-                                string manufacturer = item["Manufacturer"]?.ToString();
-                                string model = item["Model"]?.ToString();
-                                return hypervisors.FirstOrDefault(x => x.IsVirtualMachine(manufacturer, model));
-                            }
-                        }
-                    }
-                }
-                catch
-                {
-                    // Never mind
-                }
+                using var key = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\BIOS")!;
+                string model = key.GetValue("SystemProductName") as string ?? "";
+                string manufacturer = key.GetValue("SystemManufacturer") as string ?? "";
+                return hypervisors.FirstOrDefault(x => x.IsVirtualMachine(manufacturer, model));
             }
+            catch
+            {
+                // Never mind
+                return null;
+            }
+        }
 
-            return null;
+        // Suppress warning IL3000: 'System.Reflection.Assembly.Location.get' always returns an empty string for assemblies embedded in a single-file app.
+        // It's generated by IL Linker, it can't be suppresed `#pragma warning disable IL3000`
+        [UnconditionalSuppressMessage(category: "SingleFile", checkId: "IL3000", Justification = "Location property is empty when running with PublishSingleFile/PublishAot")]
+        public static string GetCoreLibDllLocation()
+            => typeof(object).Assembly.Location;
+
+        // Microsoft.DotNet.PlatformAbstractions.RuntimeEnvironment.GetRuntimeIdentifier()
+        // returns win10-x64, we want the simpler form win-x64
+        // the values taken from https://docs.microsoft.com/en-us/dotnet/core/rid-catalog#macos-rids
+        internal static string GetPortableRuntimeIdentifier()
+        {
+            string osPart = OsDetector.IsWindows() ? "win" : (OsDetector.IsMacOS() ? "osx" : "linux");
+            string architecture = ProcessArchitecture.ToString().ToLowerInvariant();
+            return $"{osPart}-{architecture}";
         }
     }
 }

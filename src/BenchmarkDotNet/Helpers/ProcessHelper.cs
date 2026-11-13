@@ -1,9 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
+using BenchmarkDotNet.Detectors;
+using BenchmarkDotNet.Loggers;
 using System.Collections.Immutable;
 using System.Diagnostics;
-using BenchmarkDotNet.Loggers;
-using JetBrains.Annotations;
+using System.Diagnostics.CodeAnalysis;
+
+#if NETSTANDARD
+using BenchmarkDotNet.Extensions;
+#endif
 
 namespace BenchmarkDotNet.Helpers
 {
@@ -11,9 +14,10 @@ namespace BenchmarkDotNet.Helpers
     {
         /// <summary>
         /// Run external process and return the console output.
-        /// In the case of any exception, null will be returned.
+        /// In the case of any exception, or if the process does not finish within <paramref name="timeout"/>, null will be returned.
         /// </summary>
-        internal static string? RunAndReadOutput(string fileName, string arguments = "", ILogger logger = null)
+        internal static string? RunAndReadOutput(string fileName, string arguments = "", ILogger? logger = null,
+            Dictionary<string, string>? environmentVariables = null, TimeSpan? timeout = null)
         {
             var processStartInfo = new ProcessStartInfo
             {
@@ -23,10 +27,13 @@ namespace BenchmarkDotNet.Helpers
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true
             };
+
+            foreach (var variable in environmentVariables ?? [])
+                processStartInfo.Environment[variable.Key] = variable.Value;
+
             using (var process = new Process { StartInfo = processStartInfo })
-            using (new ConsoleExitHandler(process, logger ?? NullLogger.Instance))
+            using (new ProcessCleanupHelper(process, logger ?? NullLogger.Instance))
             {
                 try
                 {
@@ -36,14 +43,25 @@ namespace BenchmarkDotNet.Helpers
                 {
                     return null;
                 }
-                string output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit();
-                return output;
+
+                if (timeout is null)
+                {
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+                    return output;
+                }
+
+                // On timeout, disposing the cleanup helper kills the still-running process.
+                var readTask = process.StandardOutput.ReadToEndAsync();
+                if (!readTask.Wait(timeout.Value) || !process.WaitForExit((int) timeout.Value.TotalMilliseconds))
+                    return null;
+                return readTask.Result;
             }
         }
 
-        internal static (int exitCode, ImmutableArray<string> output) RunAndReadOutputLineByLine(string fileName, string arguments = "", string workingDirectory = "",
-            Dictionary<string, string> environmentVariables = null, bool includeErrors = false, ILogger logger = null)
+        internal static async ValueTask<(int exitCode, ImmutableArray<string> output)> RunAndReadOutputLineByLineAsync(string fileName, string arguments = "", string workingDirectory = "",
+            Dictionary<string, string>? environmentVariables = null, bool includeErrors = false, ILogger? logger = null,
+            CancellationToken cancellationToken = default)
         {
             var processStartInfo = new ProcessStartInfo
             {
@@ -53,29 +71,169 @@ namespace BenchmarkDotNet.Helpers
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
-                RedirectStandardError = true
+                RedirectStandardError = includeErrors
             };
 
-            if (environmentVariables != null)
-                foreach (var environmentVariable in environmentVariables)
-                    processStartInfo.Environment[environmentVariable.Key] = environmentVariable.Value;
+            foreach (var environmentVariable in environmentVariables ?? [])
+            {
+                processStartInfo.Environment[environmentVariable.Key] = environmentVariable.Value;
+            }
 
-            using (var process = new Process { StartInfo = processStartInfo })
-            using (var outputReader = new AsyncProcessOutputReader(process))
-            using (new ConsoleExitHandler(process, logger ?? NullLogger.Instance))
+            using var process = new Process { StartInfo = processStartInfo };
+            using var outputReader = new AsyncProcessOutputReader(process, readStandardError: includeErrors);
+
+            await using (new ProcessCleanupHelper(process, outputReader, logger ?? NullLogger.Instance).ConfigureAwait(false))
             {
                 process.Start();
 
                 outputReader.BeginRead();
 
-                process.WaitForExit();
-
-                outputReader.StopRead();
-
-                var output = includeErrors ? outputReader.GetOutputAndErrorLines() : outputReader.GetOutputLines();
-
-                return (process.ExitCode, output);
+                await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
             }
+
+            var output = includeErrors ? outputReader.GetOutputAndErrorLines() : outputReader.GetOutputLines();
+
+            return (process.ExitCode, output);
+        }
+
+        /// <summary>
+        /// Run powershell/pwsh command and return the console output.
+        /// In the case of any exception, null will be returned.
+        /// </summary>
+        internal static string? RunPowerShellCommandAndReadOutput(string command, ILogger? logger = null, Dictionary<string, string>? environmentVariables = null)
+        {
+            string fileName = OsDetector.IsWindows()
+                ? PowerShellLocator.LocateOnWindows() ?? "powershell"
+                : "pwsh";
+
+            var arguments = $"""
+                -NoProfile -Command "$ErrorActionPreference='Stop';{command}"
+                """;
+
+            var processStartInfo = new ProcessStartInfo
+            {
+                FileName = fileName,
+                WorkingDirectory = "",
+                Arguments = arguments,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+            };
+
+            environmentVariables ??= [];
+
+            // Suppress outputting ANSI escape sequences.
+            if (!environmentVariables.ContainsKey("TERM"))
+                environmentVariables.Add("TERM", "dumb");
+
+            foreach (var variable in environmentVariables)
+                processStartInfo.Environment.Add(variable.Key, variable.Value);
+
+            using var process = new Process { StartInfo = processStartInfo };
+            using (new ProcessCleanupHelper(process, logger ?? NullLogger.Instance))
+            {
+                try
+                {
+                    process.Start();
+                }
+                catch (Exception)
+                {
+                    if (XUnitHelper.IsIntegrationTest.Value)
+                        throw;
+
+                    return null;
+                }
+                string output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit();
+                return output;
+            }
+        }
+
+        internal static bool TestCommandExists(string commandName, string arguments = "--version")
+        {
+            // Check command existence by using where/which command.
+            try
+            {
+                using var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = OsDetector.IsWindows() ? "where" : "which",
+                    Arguments = commandName,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                })!;
+                process.WaitForExit();
+                return process.ExitCode == 0;
+            }
+            catch
+            {
+                // On some environment. which command is not installed. (e.g. Alpine Linux)
+            }
+
+            // Check command existence by executing actual command with --version argument.
+            try
+            {
+                using var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = commandName,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                })!;
+                process.WaitForExit();
+                return process.ExitCode == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        internal static bool TryResolveExecutableInPath(string? value, [NotNullWhen(true)] out string? result)
+        {
+            result = value!;
+
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+
+            if (File.Exists(value))
+                return true;
+
+            // Typed to char[] because it could be a string or char[] with newer .net versions
+            var directories = Environment.GetEnvironmentVariable("PATH")!
+                .Split((char[]) [Path.PathSeparator], StringSplitOptions.RemoveEmptyEntries);
+
+            if (OsDetector.IsWindows())
+            {
+                var extensions = Environment.GetEnvironmentVariable("PATHEXT")!
+                    .Split((char[]) [Path.PathSeparator], StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (var directory in directories)
+                {
+                    foreach (var ext in extensions)
+                    {
+                        var candidate = Path.Combine(directory, value + ext);
+                        if (File.Exists(candidate))
+                        {
+                            result = candidate;
+                            return true;
+                        }
+                    }
+                }
+            }
+            else
+            {
+                foreach (var directory in directories)
+                {
+                    var candidate = Path.Combine(directory, value);
+                    if (File.Exists(Path.Combine(directory, value)))
+                    {
+                        result = candidate;
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
     }
 }

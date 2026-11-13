@@ -1,8 +1,7 @@
-using System;
+using System.Reflection;
 using BenchmarkDotNet.Characteristics;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
-using JetBrains.Annotations;
 using Perfolizer.Horology;
 
 namespace BenchmarkDotNet.Engines
@@ -11,32 +10,30 @@ namespace BenchmarkDotNet.Engines
     {
         public static readonly IResolver DefaultResolver = new CompositeResolver(BenchmarkRunnerClean.DefaultResolver, EngineResolver.Instance);
 
-        public IHost Host { get; set; }
-        public Action<long> WorkloadActionNoUnroll { get; set; }
-        public Action<long> WorkloadActionUnroll { get; set; }
-        public Action Dummy1Action { get; set; }
-        public Action Dummy2Action { get; set; }
-        public Action Dummy3Action { get; set; }
-        public Action<long> OverheadActionNoUnroll { get; set; }
-        public Action<long> OverheadActionUnroll { get; set; }
-        public Job TargetJob { get; set; } = Job.Default;
+        public IResolver Resolver { get; set; } = DefaultResolver;
+        public required IHost Host { get; set; }
+        public required string BenchmarkName { get; set; }
         public long OperationsPerInvoke { get; set; } = 1;
-        public Action GlobalSetupAction { get; set; }
-        public Action GlobalCleanupAction { get; set; }
-        public Action IterationSetupAction { get; set; }
-        public Action IterationCleanupAction { get; set; }
-        public bool MeasureExtraStats { get; set; }
+        public bool RunExtraIteration { get; set; }
 
-        [PublicAPI] public string BenchmarkName { get;  set; }
+        // The generated code fills in the properties as it proceeds.
+        public Func<long, IClock, ValueTask<ClockSpan>> WorkloadActionNoUnroll { get; set; } = null!;
+        public Func<long, IClock, ValueTask<ClockSpan>> WorkloadActionUnroll { get; set; } = null!;
+        public Func<long, IClock, ValueTask<ClockSpan>> OverheadActionNoUnroll { get; set; } = null!;
+        public Func<long, IClock, ValueTask<ClockSpan>> OverheadActionUnroll { get; set; } = null!;
 
-        public bool NeedsJitting => TargetJob.ResolveValue(RunMode.RunStrategyCharacteristic, DefaultResolver).NeedsJitting();
+        public Func<ValueTask> GlobalSetupAction { get; set; } = null!;
+        public Func<ValueTask> GlobalCleanupAction { get; set; } = null!;
+        public Func<ValueTask> IterationSetupAction { get; set; } = null!;
+        public Func<ValueTask> IterationCleanupAction { get; set; } = null!;
 
-        public bool HasInvocationCount => TargetJob.HasValue(RunMode.InvocationCountCharacteristic);
+        /// <summary>
+        /// The benchmark method(s), used by the jit stage to watch for their tier-up via JIT events.
+        /// When empty (nothing to watch, or resolution failed), the jit stage falls back to a fixed delay.
+        /// </summary>
+        public IEnumerable<MethodInfo> WorkloadMethods { get; set; } = [];
 
-        public bool HasUnrollFactor => TargetJob.HasValue(RunMode.UnrollFactorCharacteristic);
-
-        public int UnrollFactor => TargetJob.ResolveValue(RunMode.UnrollFactorCharacteristic, DefaultResolver);
-
-        public TimeInterval IterationTime => TargetJob.ResolveValue(RunMode.IterationTimeCharacteristic, DefaultResolver);
+        public Job TargetJob { get; set; } = Job.Default;
+        public Diagnosers.CompositeInProcessDiagnoserHandler InProcessDiagnoserHandler { get; set; } = null!;
     }
 }

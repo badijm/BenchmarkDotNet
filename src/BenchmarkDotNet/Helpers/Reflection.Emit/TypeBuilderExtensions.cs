@@ -1,5 +1,3 @@
-﻿using System;
-using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 
@@ -23,15 +21,6 @@ namespace BenchmarkDotNet.Helpers.Reflection.Emit
             }
 
             methodBuilder.DefineParameter(0, returnType.Attributes, "");
-        }
-
-        public static MethodInfo GetDelegateInvokeMethod(Type delegateType)
-        {
-            var result = delegateType.GetMethod(nameof(Action.Invoke));
-            if (result == null)
-                throw new ArgumentException($"The type {delegateType} nas no Invoke method.", nameof(delegateType));
-
-            return result;
         }
 
         public static ConstructorBuilder DefinePublicInstanceCtor(this TypeBuilder typeBuilder, params ParameterInfo[] parameters)

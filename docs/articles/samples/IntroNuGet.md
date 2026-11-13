@@ -4,7 +4,7 @@ uid: BenchmarkDotNet.Samples.IntroNuGet
 
 ## Sample: IntroNuGet
 
-You can set specific versions of NuGet dependencies for each job.
+You can set specific versions of NuGet dependencies for each job using MsBuild properties in your csproj.
 It allows comparing different versions of the same package (if there are no breaking changes in API).
 
 ### Source code
@@ -13,14 +13,12 @@ It allows comparing different versions of the same package (if there are no brea
 
 ### Output
 
-|                   Method |    Job |        NuGetReferences |     Mean |     Error |    StdDev |
-|------------------------- |------- |----------------------- |---------:|----------:|----------:|
-| SerializeAnonymousObject | 10.0.1 | Newtonsoft.Json 10.0.1 | 2.926 us | 0.0795 us | 0.0283 us |
-| SerializeAnonymousObject | 10.0.2 | Newtonsoft.Json 10.0.2 | 2.877 us | 0.5928 us | 0.2114 us |
-| SerializeAnonymousObject | 10.0.3 | Newtonsoft.Json 10.0.3 | 2.706 us | 0.1251 us | 0.0446 us |
-| SerializeAnonymousObject | 11.0.1 | Newtonsoft.Json 11.0.1 | 2.778 us | 0.5037 us | 0.1796 us |
-| SerializeAnonymousObject | 11.0.2 | Newtonsoft.Json 11.0.2 | 2.644 us | 0.0609 us | 0.0217 us |
-| SerializeAnonymousObject |  9.0.1 |  Newtonsoft.Json 9.0.1 | 2.722 us | 0.3552 us | 0.1267 us |
+| Method                   | Job     | Arguments                       | Mean     | Error    | StdDev   |
+|------------------------- |-------- |-------------------------------- |---------:|---------:|---------:|
+| SerializeAnonymousObject | v13.0.1 | /p:NewtonsoftJsonVersion=13.0.1 | 652.7 ns | 10.68 ns | 15.98 ns |
+| SerializeAnonymousObject | v13.0.2 | /p:NewtonsoftJsonVersion=13.0.2 | 654.0 ns |  8.62 ns | 12.89 ns |
+| SerializeAnonymousObject | v13.0.3 | /p:NewtonsoftJsonVersion=13.0.3 | 678.6 ns | 17.62 ns | 26.38 ns |
+| SerializeAnonymousObject | v13.0.4 | /p:NewtonsoftJsonVersion=13.0.4 | 637.2 ns | 16.95 ns | 24.84 ns |
 
 ### Links
 

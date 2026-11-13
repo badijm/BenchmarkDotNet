@@ -1,7 +1,3 @@
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.IO.Pipes;
 using BenchmarkDotNet.Characteristics;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Engines;
@@ -13,80 +9,94 @@ using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Toolchains.Parameters;
 using BenchmarkDotNet.Toolchains.Results;
 using JetBrains.Annotations;
+using System.Diagnostics;
 
 namespace BenchmarkDotNet.Toolchains.DotNetCli
 {
     [PublicAPI]
-    public class DotNetCliExecutor : IExecutor
+    public class DotNetCliExecutor(FileInfo? customDotNetCliPath) : IExecutor
     {
-        public DotNetCliExecutor(string customDotNetCliPath) => CustomDotNetCliPath = customDotNetCliPath;
-
-        private string CustomDotNetCliPath { get; }
-
-        public ExecuteResult Execute(ExecuteParameters executeParameters)
+        public async ValueTask<ExecuteResult> ExecuteAsync(ExecuteParameters executeParameters, CancellationToken cancellationToken)
         {
             if (!File.Exists(executeParameters.BuildResult.ArtifactsPaths.ExecutablePath))
             {
                 executeParameters.Logger.WriteLineError($"Did not find {executeParameters.BuildResult.ArtifactsPaths.ExecutablePath}, but the folder contained:");
                 foreach (var file in new DirectoryInfo(executeParameters.BuildResult.ArtifactsPaths.BinariesDirectoryPath).GetFiles("*.*"))
+                {
                     executeParameters.Logger.WriteLineError(file.Name);
+                }
 
                 return ExecuteResult.CreateFailed();
             }
 
             try
             {
-                return Execute(
+                return await Execute(
                     executeParameters.BenchmarkCase,
                     executeParameters.BenchmarkId,
                     executeParameters.Logger,
                     executeParameters.BuildResult.ArtifactsPaths,
                     executeParameters.Diagnoser,
+                    executeParameters.CompositeInProcessDiagnoser,
                     Path.GetFileName(executeParameters.BuildResult.ArtifactsPaths.ExecutablePath),
                     executeParameters.Resolver,
-                    executeParameters.LaunchIndex);
+                    executeParameters.LaunchIndex,
+                    executeParameters.DiagnoserRunMode,
+                    cancellationToken
+                ).ConfigureAwait();
             }
             finally
             {
-                executeParameters.Diagnoser?.Handle(
+                await executeParameters.Diagnoser.HandleAsync(
                     HostSignal.AfterProcessExit,
-                    new DiagnoserActionParameters(null, executeParameters.BenchmarkCase, executeParameters.BenchmarkId));
+                    new DiagnoserActionParameters(null, executeParameters.BenchmarkCase, executeParameters.BenchmarkId),
+                    cancellationToken
+                ).ConfigureAwait(false);
             }
         }
 
-        private ExecuteResult Execute(BenchmarkCase benchmarkCase,
-                                      BenchmarkId benchmarkId,
-                                      ILogger logger,
-                                      ArtifactsPaths artifactsPaths,
-                                      IDiagnoser diagnoser,
-                                      string executableName,
-                                      IResolver resolver,
-                                      int launchIndex)
+        private async ValueTask<ExecuteResult> Execute(BenchmarkCase benchmarkCase,
+            BenchmarkId benchmarkId,
+            ILogger logger,
+            ArtifactsPaths artifactsPaths,
+            IDiagnoser diagnoser,
+            CompositeInProcessDiagnoser compositeInProcessDiagnoser,
+            string executableName,
+            IResolver resolver,
+            int launchIndex,
+            Diagnosers.RunMode diagnoserRunMode,
+            CancellationToken cancellationToken)
         {
-            using AnonymousPipeServerStream inputFromBenchmark = new AnonymousPipeServerStream(PipeDirection.In, HandleInheritability.Inheritable);
-            using AnonymousPipeServerStream acknowledgments = new AnonymousPipeServerStream(PipeDirection.Out, HandleInheritability.Inheritable);
+            using var tcplistener = new TcpListener();
+            var port = tcplistener.StartAndGetPort();
 
             var startInfo = DotNetCliCommandExecutor.BuildStartInfo(
-                CustomDotNetCliPath,
+                customDotNetCliPath,
                 artifactsPaths.BinariesDirectoryPath,
-                $"{executableName.EscapeCommandLine()} {benchmarkId.ToArguments(inputFromBenchmark.GetClientHandleAsString(), acknowledgments.GetClientHandleAsString())}",
+                $"{executableName.EscapeCommandLine()} {benchmarkId.ToArguments(port, diagnoserRunMode)}",
                 redirectStandardOutput: true,
                 redirectStandardInput: false,
-                redirectStandardError: false); // #1629
+                redirectStandardError: true);
 
             startInfo.SetEnvironmentVariables(benchmarkCase, resolver);
 
-            using (Process process = new () { StartInfo = startInfo })
-            using (ConsoleExitHandler consoleExitHandler = new (process, logger))
-            using (AsyncProcessOutputReader processOutputReader = new (process, logOutput: true, logger, readStandardError: false))
+            using Process process = new() { StartInfo = startInfo };
+            using AsyncProcessOutputReader processOutputReader = new(process, stdOutLogger: logger, stdErrLogger: logger, cacheStandardError: false);
+
+            List<string> results;
+            List<string> prefixedOutput;
+            await using (new ProcessCleanupHelper(process, processOutputReader, logger).ConfigureAwait(false))
             {
-                Broker broker = new (logger, process, diagnoser, benchmarkCase, benchmarkId, inputFromBenchmark, acknowledgments);
+                using Broker broker = new(logger, process, diagnoser, compositeInProcessDiagnoser, benchmarkCase, benchmarkId, tcplistener);
 
                 logger.WriteLineInfo($"// Execute: {process.StartInfo.FileName} {process.StartInfo.Arguments} in {process.StartInfo.WorkingDirectory}");
 
-                diagnoser?.Handle(HostSignal.BeforeProcessStart, new DiagnoserActionParameters(process, benchmarkCase, benchmarkId));
+                await diagnoser.HandleAsync(HostSignal.BeforeProcessStart, broker.DiagnoserActionParameters, cancellationToken).ConfigureAwait();
 
                 process.Start();
+
+                await diagnoser.HandleAsync(HostSignal.AfterProcessStart, broker.DiagnoserActionParameters, cancellationToken).ConfigureAwait();
+
                 processOutputReader.BeginRead();
 
                 process.EnsureHighPriority(logger);
@@ -95,28 +105,24 @@ namespace BenchmarkDotNet.Toolchains.DotNetCli
                     process.TrySetAffinity(benchmarkCase.Job.Environment.Affinity, logger);
                 }
 
-                broker.ProcessData();
+                await broker.ProcessData(cancellationToken).ConfigureAwait(false);
 
-                if (!process.WaitForExit(milliseconds: (int)ExecuteParameters.ProcessExitTimeout.TotalMilliseconds))
+                results = broker.Results;
+                prefixedOutput = broker.PrefixedOutput;
+
+                if (!process.WaitForExit(milliseconds: (int) ExecuteParameters.ProcessExitTimeout.TotalMilliseconds))
                 {
                     logger.WriteLineInfo($"// The benchmarking process did not quit within {ExecuteParameters.ProcessExitTimeout.TotalSeconds} seconds, it's going to get force killed now.");
-
-                    processOutputReader.CancelRead();
-                    consoleExitHandler.KillProcessTree();
                 }
-                else
-                {
-                    processOutputReader.StopRead();
-                }
-
-                return new ExecuteResult(true,
-                    process.HasExited ? process.ExitCode : null,
-                    process.Id,
-                    broker.Results,
-                    broker.PrefixedOutput,
-                    processOutputReader.GetOutputLines(),
-                    launchIndex);
             }
+
+            return new ExecuteResult(true,
+                process.HasExited ? process.ExitCode : null,
+                process.Id,
+                results,
+                prefixedOutput,
+                processOutputReader.GetOutputLines(),
+                launchIndex);
         }
     }
 }

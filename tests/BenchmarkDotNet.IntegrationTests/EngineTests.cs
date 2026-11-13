@@ -1,12 +1,13 @@
-using System.Linq;
-using System.Threading;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Reports;
-using Xunit;
-using Xunit.Abstractions;
+using BenchmarkDotNet.Tests.XUnit;
+using BenchmarkDotNet.Toolchains;
+using BenchmarkDotNet.Toolchains.InProcess.Emit;
+using BenchmarkDotNet.Toolchains.InProcess.NoEmit;
+using System.Diagnostics;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -60,10 +61,7 @@ namespace BenchmarkDotNet.IntegrationTests
                 Assert.True(count > 0, $"AllMeasurements don't contain {mode}{stage}");
             }
 
-            Check(IterationMode.Overhead, IterationStage.Jitting);
             Check(IterationMode.Workload, IterationStage.Jitting);
-            Check(IterationMode.Overhead, IterationStage.Warmup);
-            Check(IterationMode.Overhead, IterationStage.Actual);
             Check(IterationMode.Workload, IterationStage.Warmup);
             Check(IterationMode.Workload, IterationStage.Actual);
             Check(IterationMode.Workload, IterationStage.Result);
@@ -73,6 +71,39 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             [Benchmark]
             public void Foo() => Thread.Sleep(10);
+        }
+
+        public static TheoryData<IToolchain> GetToolchains() =>
+        [
+            InProcessEmitToolchain.Default,
+            InProcessNoEmitToolchain.Default,
+            Job.Default.GetToolchain()
+        ];
+
+        // https://github.com/dotnet/BenchmarkDotNet/issues/1120
+        [TheoryEnvSpecific(EnvRequirement.NonGitHubDraftPR)]
+        [MemberData(nameof(GetToolchains), DisableDiscoveryEnumeration = true)]
+        public void BenchmarkIsInvokedWithSameStack(IToolchain toolchain)
+        {
+            CanExecute<StackBench>(DefaultConfig.Instance
+                .WithOptions(ConfigOptions.DisableOptimizationsValidator)
+                .AddJob(Job.Default.WithToolchain(toolchain).WithUnrollFactor(1)));
+        }
+
+        public class StackBench
+        {
+            private string? _stacktrace;
+
+            [Benchmark]
+            public void CheckStack()
+            {
+                var stacktrace = new StackTrace(true).ToString();
+                if (_stacktrace != null && _stacktrace != stacktrace)
+                {
+                    throw new Exception($"Stack trace is different between benchmark invocations!\n\n{_stacktrace}\n\n{stacktrace}");
+                }
+                _stacktrace = stacktrace;
+            }
         }
     }
 }

@@ -1,6 +1,3 @@
-﻿using System.Linq;
-using JetBrains.Annotations;
-
 namespace BenchmarkDotNet.Exporters.Csv
 {
     // TODO: Introduce a CsvWriter class (based on ILogger and CsvSeparator)
@@ -8,7 +5,7 @@ namespace BenchmarkDotNet.Exporters.Csv
     {
         private const string Quote = "\"";
         private const string TwoQuotes = "\"\"";
-        private static readonly char[] ForbiddenSymbols = { '\n', '\r', '"', ',' };
+        private static readonly char[] ForbiddenSymbols = ['\n', '\r', '"', ','];
 
         public static string Escape(string? value, string currentListSeparator)
         {

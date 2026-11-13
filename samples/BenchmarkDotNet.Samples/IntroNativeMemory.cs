@@ -1,8 +1,8 @@
-﻿using System;
-using System.Drawing;
-using System.Runtime.InteropServices;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Diagnostics.Windows.Configs;
+using BenchmarkDotNet.Filters;
+using System.Drawing;
+using System.Runtime.InteropServices;
 
 namespace BenchmarkDotNet.Samples
 {
@@ -11,7 +11,8 @@ namespace BenchmarkDotNet.Samples
     [MemoryDiagnoser]
     public class IntroNativeMemory
     {
-        [Benchmark]
+#pragma warning disable CA1416
+        [Benchmark, WindowsOnly]
         public void BitmapWithLeaks()
         {
             var flag = new Bitmap(200, 100);
@@ -20,7 +21,7 @@ namespace BenchmarkDotNet.Samples
             graphics.DrawLine(blackPen, 100, 100, 500, 100);
         }
 
-        [Benchmark]
+        [Benchmark, WindowsOnly]
         public void Bitmap()
         {
             using (var flag = new Bitmap(200, 100))
@@ -34,9 +35,10 @@ namespace BenchmarkDotNet.Samples
                 }
             }
         }
+#pragma warning restore CA1416
 
         private const int Size = 20; // Greater value could cause System.OutOfMemoryException for test with memory leaks.
-        private int ArraySize = Size * Marshal.SizeOf(typeof(int));
+        private int ArraySize = Size * Marshal.SizeOf<int>();
 
         [Benchmark]
         public unsafe void AllocHGlobal()
@@ -51,6 +53,14 @@ namespace BenchmarkDotNet.Samples
         {
             IntPtr unmanagedHandle = Marshal.AllocHGlobal(ArraySize);
             Span<byte> unmanaged = new Span<byte>(unmanagedHandle.ToPointer(), ArraySize);
+        }
+
+        private class WindowsOnlyAttribute : FilterConfigBaseAttribute
+        {
+            public WindowsOnlyAttribute()
+                : base(new SimpleFilter(_ => RuntimeInformation.IsOSPlatform(OSPlatform.Windows)))
+            {
+            }
         }
     }
 }

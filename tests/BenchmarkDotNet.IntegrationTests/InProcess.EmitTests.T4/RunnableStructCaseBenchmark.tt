@@ -1,4 +1,4 @@
-﻿<#@ template debug="false" hostspecific="false" language="C#" #>
+<#@ template debug="false" hostspecific="false" language="C#" #>
 <#@ assembly name="System.Core" #>
 <#@ output extension=".cs" #>
 //------------------------------------------------------------------------------
@@ -54,12 +54,15 @@ namespace BenchmarkDotNet.IntegrationTests.InProcess.EmitTests
     }
 }<#+
 
-    private void EmitStructCaseBenchmark(ref int counter, string type, string argValue = null)
+    private void EmitStructCaseBenchmark(ref int counter, string type, string? argValue = null)
     {
 #>
         // ---- Begin StructCase(<#=type#>) ----
 
         private <#=type#> _refResultHolder<#=counter#>;
+
+        [Benchmark]
+        public ref readonly <#=type#> RefReadonlyReturnStructCase<#=counter#>() => ref _refResultHolder<#=counter#>;
 
         [Benchmark]
         public ref <#=type#> RefReturnStructCase<#=counter#>() => ref _refResultHolder<#=counter#>;

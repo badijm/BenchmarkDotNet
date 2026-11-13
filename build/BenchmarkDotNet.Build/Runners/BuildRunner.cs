@@ -1,0 +1,189 @@
+using Cake.Common.Build;
+using Cake.Common.Diagnostics;
+using Cake.Common.IO;
+using Cake.Common.Tools.DotNet;
+using Cake.Common.Tools.DotNet.Build;
+using Cake.Common.Tools.DotNet.Pack;
+using Cake.Common.Tools.DotNet.Restore;
+using Cake.Common.Tools.DotNet.Workload.Install;
+using Cake.Core;
+using Cake.Core.IO;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
+namespace BenchmarkDotNet.Build.Runners;
+
+public class BuildRunner
+{
+    private readonly BuildContext context;
+    private readonly bool isFullPack;
+
+    public BuildRunner(BuildContext context)
+    {
+        this.context = context;
+        isFullPack = context.Arguments.GetArgument("target") is PackTask.Name or ReleaseTask.Name;
+    }
+
+    private void MaybeAppendArgument(DotNetSettings settings)
+    {
+        if (isFullPack)
+        {
+            settings.ArgumentCustomization = args => args.Append("-p:IsFullPack=true");
+        }
+    }
+
+    /// <param name="develop">
+    /// Pack with the local-development version suffix even on CI, for the package committed to the repository.
+    /// </param>
+    public void PackWeaver(bool develop = false)
+    {
+        var weaverPath = context.AllPackableSrcProjects.Single(p => p.GetFilename() == "BenchmarkDotNet.Weaver.csproj");
+        var outputPackageDir = weaverPath.GetDirectory().Combine("packages");
+
+        if (!isFullPack)
+        {
+            // Delete old package.
+            foreach (var file in Directory.EnumerateFiles(outputPackageDir.FullPath))
+            {
+                File.Delete(file);
+            }
+        }
+
+        // common.props picks the 'ci' suffix from BDN_CI_BUILD; clearing it here leaves the other packages' versions alone.
+        var environment = new Dictionary<string, string>();
+        if (develop)
+            environment["BDN_CI_BUILD"] = "";
+
+        var restoreSettings = new DotNetRestoreSettings
+        {
+            MSBuildSettings = context.MsBuildSettingsRestore,
+            EnvironmentVariables = environment
+        };
+        context.DotNetRestore(weaverPath.GetDirectory().FullPath, restoreSettings);
+
+        context.Information("BuildSystemProvider: " + context.BuildSystem().Provider);
+        var buildSettings = new DotNetBuildSettings
+        {
+            NoRestore = true,
+            DiagnosticOutput = true,
+            MSBuildSettings = context.MsBuildSettingsBuild,
+            Configuration = context.BuildConfiguration,
+            Verbosity = context.BuildVerbosity,
+            EnvironmentVariables = environment
+        };
+        context.DotNetBuild(weaverPath.FullPath, buildSettings);
+
+        var packSettings = new DotNetPackSettings
+        {
+            OutputDirectory = outputPackageDir,
+            MSBuildSettings = context.MsBuildSettingsPack,
+            Configuration = context.BuildConfiguration,
+            EnvironmentVariables = environment
+        };
+        context.DotNetPack(weaverPath.FullPath, packSettings);
+    }
+
+    public void Restore()
+    {
+        var restoreSettings = new DotNetRestoreSettings
+        {
+            MSBuildSettings = context.MsBuildSettingsRestore,
+        };
+        MaybeAppendArgument(restoreSettings);
+        context.DotNetRestore(context.SolutionFile.FullPath, restoreSettings);
+    }
+
+    public void InstallWorkload(string workloadId)
+    {
+        context.DotNetWorkloadInstall(workloadId,
+            new DotNetWorkloadInstallSettings
+            {
+                IncludePreviews = true,
+                NoCache = true
+            });
+    }
+
+    public void Build()
+    {
+        context.Information("BuildSystemProvider: " + context.BuildSystem().Provider);
+        var buildSettings = new DotNetBuildSettings
+        {
+            NoRestore = true,
+            DiagnosticOutput = true,
+            MSBuildSettings = context.MsBuildSettingsBuild,
+            Configuration = context.BuildConfiguration,
+            Verbosity = context.BuildVerbosity
+        };
+        MaybeAppendArgument(buildSettings);
+        context.DotNetBuild(context.SolutionFile.FullPath, buildSettings);
+    }
+
+    public void BuildProjectSilent(FilePath projectFile)
+    {
+        var buildSettings = new DotNetBuildSettings
+        {
+            NoRestore = false,
+            DiagnosticOutput = false,
+            MSBuildSettings = context.MsBuildSettingsBuild,
+            Configuration = context.BuildConfiguration,
+            Verbosity = DotNetVerbosity.Quiet
+        };
+        MaybeAppendArgument(buildSettings);
+        context.DotNetBuild(projectFile.FullPath, buildSettings);
+    }
+
+    public void BuildAnalyzers()
+    {
+        context.Information("BuildSystemProvider: " + context.BuildSystem().Provider);
+        // Each band must restore as well as build: the PackageReference is chosen by MccVersion, so reusing the
+        // default band's project.assets.json silently compiles every band against the default's Roslyn.
+        string[] mccVersions = ["4.0", "4.4", "4.8", "4.12"];
+        foreach (string version in mccVersions)
+        {
+            context.DotNetBuild(context.AnalyzersProjectFile.FullPath, new DotNetBuildSettings
+            {
+                NoRestore = false,
+                DiagnosticOutput = true,
+                MSBuildSettings = context.MsBuildSettingsBuild,
+                Configuration = context.BuildConfiguration,
+                Verbosity = context.BuildVerbosity,
+                ArgumentCustomization = args => args.Append($"-p:MccVersion={version}")
+            });
+
+            context.DotNetBuild(context.CodeFixersProjectFile.FullPath, new DotNetBuildSettings
+            {
+                NoRestore = false,
+                DiagnosticOutput = true,
+                MSBuildSettings = context.MsBuildSettingsBuild,
+                Configuration = context.BuildConfiguration,
+                Verbosity = context.BuildVerbosity,
+                ArgumentCustomization = args => args.Append($"-p:MccVersion={version}")
+            });
+        }
+    }
+
+    public void Pack()
+    {
+        context.CleanDirectory(context.ArtifactsDirectory);
+
+        var settingsSrc = new DotNetPackSettings
+        {
+            OutputDirectory = context.ArtifactsDirectory,
+            ArgumentCustomization = args => args.Append("--include-symbols").Append("-p:SymbolPackageFormat=snupkg").Append("-p:IsFullPack=true"),
+            MSBuildSettings = context.MsBuildSettingsPack,
+            Configuration = context.BuildConfiguration
+        };
+
+        foreach (var project in context.AllPackableSrcProjects)
+            context.DotNetPack(project.FullPath, settingsSrc);
+
+        var settingsTemplate = new DotNetPackSettings
+        {
+            OutputDirectory = context.ArtifactsDirectory,
+            MSBuildSettings = context.MsBuildSettingsPack,
+            Configuration = context.BuildConfiguration
+        };
+        context.DotNetPack(context.TemplatesTestsProjectFile.FullPath, settingsTemplate);
+    }
+}

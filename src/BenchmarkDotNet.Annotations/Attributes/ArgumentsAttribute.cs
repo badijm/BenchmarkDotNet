@@ -1,18 +1,17 @@
-﻿using JetBrains.Annotations;
-using System;
+using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.Attributes
 {
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
     public class ArgumentsAttribute : PriorityAttribute
     {
-        public object[] Values { get; }
+        public object?[] Values { get; }
 
         // CLS-Compliant Code requires a constructor without an array in the argument list
         [PublicAPI]
-        public ArgumentsAttribute() => Values = new object[0];
+        public ArgumentsAttribute() => Values = [];
 
-        public ArgumentsAttribute(params object[] values)
-            => Values = values ?? new object[] { null }; // when users do Arguments(null) they mean one, null argument
+        public ArgumentsAttribute(params object?[]? values)
+            => Values = values ?? [null]; // when users do Arguments(null) they mean one, null argument
     }
 }

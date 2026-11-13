@@ -1,8 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
 using BenchmarkDotNet.Characteristics;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Environments;
-using BenchmarkDotNet.Portability;
+using BenchmarkDotNet.Models;
 using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.Jobs
@@ -11,10 +10,12 @@ namespace BenchmarkDotNet.Jobs
     {
         public static readonly Characteristic<Platform> PlatformCharacteristic = CreateCharacteristic<Platform>(nameof(Platform));
         public static readonly Characteristic<Jit> JitCharacteristic = CreateCharacteristic<Jit>(nameof(Jit));
-        public static readonly Characteristic<Runtime> RuntimeCharacteristic = CreateCharacteristic<Runtime>(nameof(Runtime));
         public static readonly Characteristic<IntPtr> AffinityCharacteristic = CreateCharacteristic<IntPtr>(nameof(Affinity));
         public static readonly Characteristic<GcMode> GcCharacteristic = CreateCharacteristic<GcMode>(nameof(Gc));
-        public static readonly Characteristic<IReadOnlyList<EnvironmentVariable>> EnvironmentVariablesCharacteristic = CreateCharacteristic<IReadOnlyList<EnvironmentVariable>>(nameof(EnvironmentVariables));
+
+        public static readonly Characteristic<IReadOnlyList<EnvironmentVariable>> EnvironmentVariablesCharacteristic =
+            CreateCharacteristic<IReadOnlyList<EnvironmentVariable>>(nameof(EnvironmentVariables));
+
         public static readonly Characteristic<Guid?> PowerPlanModeCharacteristic = CreateCharacteristic<Guid?>(nameof(PowerPlanMode));
         public static readonly Characteristic<bool> LargeAddressAwareCharacteristic = CreateCharacteristic<bool>(nameof(LargeAddressAware));
 
@@ -24,10 +25,7 @@ namespace BenchmarkDotNet.Jobs
         public static readonly EnvironmentMode RyuJitX86 = new EnvironmentMode(nameof(RyuJitX86), Jit.RyuJit, Platform.X86).Freeze();
 
         [PublicAPI]
-        public EnvironmentMode() : this(id: null) { }
-
-        [PublicAPI]
-        public EnvironmentMode(Runtime runtime) : this(runtime.ToString()) => Runtime = runtime;
+        public EnvironmentMode() : this(id: "") { }
 
         [PublicAPI]
         public EnvironmentMode(string id, Jit jit, Platform platform) : this(id)
@@ -37,7 +35,10 @@ namespace BenchmarkDotNet.Jobs
         }
 
         [PublicAPI]
-        public EnvironmentMode(string id) : base(id) => GcCharacteristic[this] = new GcMode();
+        public EnvironmentMode(string id) : base(id)
+        {
+            GcCharacteristic[this] = new GcMode();
+        }
 
         /// <summary>
         /// Platform (x86 or x64)
@@ -58,15 +59,6 @@ namespace BenchmarkDotNet.Jobs
         }
 
         /// <summary>
-        /// Runtime
-        /// </summary>
-        public Runtime Runtime
-        {
-            get { return RuntimeCharacteristic[this]; }
-            set { RuntimeCharacteristic[this] = value; }
-        }
-
-        /// <summary>
         /// ProcessorAffinity for the benchmark process.
         /// See also: https://msdn.microsoft.com/library/system.diagnostics.process.processoraffinity.aspx
         /// </summary>
@@ -79,11 +71,11 @@ namespace BenchmarkDotNet.Jobs
         /// <summary>
         /// GcMode
         /// </summary>
-        public GcMode Gc => GcCharacteristic[this];
+        public GcMode Gc => GcCharacteristic[this]!;
 
         public IReadOnlyList<EnvironmentVariable> EnvironmentVariables
         {
-            get => EnvironmentVariablesCharacteristic[this];
+            get => EnvironmentVariablesCharacteristic[this] ?? [];
             set => EnvironmentVariablesCharacteristic[this] = value;
         }
 
@@ -107,7 +99,7 @@ namespace BenchmarkDotNet.Jobs
             get => LargeAddressAwareCharacteristic[this];
             set
             {
-                if (value && !RuntimeInformation.IsWindows())
+                if (value && !OsDetector.IsWindows())
                 {
                     throw new NotSupportedException("LargeAddressAware is a Windows-specific concept.");
                 }
@@ -125,13 +117,16 @@ namespace BenchmarkDotNet.Jobs
         public void SetEnvironmentVariable(EnvironmentVariable variable)
         {
             var newVariables = new List<EnvironmentVariable>();
-            if (EnvironmentVariables != null)
-                newVariables.AddRange(EnvironmentVariables);
+            newVariables.AddRange(EnvironmentVariables);
             newVariables.RemoveAll(v => v.Key.Equals(variable.Key, StringComparison.Ordinal));
             newVariables.Add(variable);
             EnvironmentVariables = newVariables;
         }
 
-        internal Runtime GetRuntime() => HasValue(RuntimeCharacteristic) ? Runtime : RuntimeInformation.GetCurrentRuntime();
+        internal BdnEnvironment ToPerfonar() => new()
+        {
+            Jit = HasValue(JitCharacteristic) ? Jit : null,
+            Affinity = HasValue(AffinityCharacteristic) ? (long) Affinity : null
+        };
     }
 }

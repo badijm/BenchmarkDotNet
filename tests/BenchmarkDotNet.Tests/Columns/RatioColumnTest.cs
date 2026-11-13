@@ -1,12 +1,6 @@
-using System;
-using System.Linq;
-using System.Xml.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Tests.Mocks;
-using BenchmarkDotNet.Tests.Mocks.Toolchain;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.Tests.Columns
 {
@@ -24,8 +18,8 @@ namespace BenchmarkDotNet.Tests.Columns
         {
             var summary = MockRunner.Run<BenchmarkClass>(output, name => name switch
             {
-                "Foo" => new double[] { 2, 2, 2 },
-                "Bar" => new double[] { 4, 4, 4 },
+                "Foo" => [2, 2, 2],
+                "Bar" => [4, 4, 4],
                 _ => throw new InvalidOperationException()
             });
 

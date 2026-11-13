@@ -1,40 +1,28 @@
-﻿using System;
-using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.IntegrationTests.Xunit;
 using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Portability;
+using BenchmarkDotNet.Tests.Loggers;
 using BenchmarkDotNet.Tests.XUnit;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
+    [Collection(Constants.LongRunningTests)]
     public class MonoTests : BenchmarkTestExecutor
     {
-        [FactDotNetCoreOnly("UseMonoRuntime option is available in .NET Core only starting from .NET 6")]
-        public void Mono70IsSupported()
+        public MonoTests(ITestOutputHelper output) : base(output) { }
+
+        [FactEnvSpecific("UseMonoRuntime option is available in .NET Core only starting from .NET 6, and it's not supported on Windows+Arm", [EnvRequirement.DotNetCoreOnly, EnvRequirement.NonWindowsArm, EnvRequirement.NonGitHubDraftPR])]
+        public void Mono80IsSupported()
         {
-            if (ContinuousIntegration.IsAppVeyorOnWindows())
-                return; // timeouts
-
-            var config = ManualConfig.CreateEmpty().AddJob(Job.Dry.WithRuntime(MonoRuntime.Mono70));
-            CanExecute<MonoBenchmark>(config);
-        }
-
-        public class MonoBenchmark
-        {
-            [Benchmark]
-            public void Check()
-            {
-                if (Type.GetType("Mono.RuntimeStructs") == null)
-                {
-                    throw new Exception("This is not Mono runtime");
-                }
-
-                if (RuntimeInformation.GetCurrentRuntime() != MonoRuntime.Mono70)
-                {
-                    throw new Exception("Incorrect runtime detection");
-                }
-            }
+            var logger = new OutputLogger(Output);
+            var config = ManualConfig.CreateEmpty()
+                .AddLogger(logger)
+                .AddJob(Job.Dry.WithRuntime(MonoCoreRuntime.Net80))
+                .WithBuildTimeout(TimeSpan.FromSeconds(240));
+            // MonoBenchmark lives in a separate project that targets net8.0, because Mono packages
+            // are no longer published for net9.0+ and this project no longer targets net8.0.
+            CanExecute<MonoBenchmarks.MonoBenchmark>(config);
         }
     }
 }

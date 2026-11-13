@@ -1,9 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
 using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Reports;
+using System.Linq.Expressions;
 
 namespace BenchmarkDotNet.Extensions
 {
@@ -34,5 +31,20 @@ namespace BenchmarkDotNet.Extensions
 
         public static Statistics GetStatistics(this IEnumerable<Measurement> runs) =>
             GetStatistics(runs.ToList());
+
+        public static bool HasError(this IEnumerable<Summary> summaries)
+        {
+            if (summaries.Count() == 0)
+            {
+                // When following argument specified. BenchmarkDotNet show information only.
+                var knownArguments = new HashSet<string>(["--help", "--list", "--info", "--version"]);
+                return !Environment.GetCommandLineArgs().Any(knownArguments.Contains);
+            }
+
+            if (summaries.Any(x => x.HasCriticalValidationErrors))
+                return true;
+
+            return summaries.Any(x => x.Reports.Any(r => !r.Success));
+        }
     }
 }

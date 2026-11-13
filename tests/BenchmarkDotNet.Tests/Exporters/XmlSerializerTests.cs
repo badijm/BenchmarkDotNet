@@ -1,10 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.Text;
 using BenchmarkDotNet.Exporters.Xml;
 using JetBrains.Annotations;
-using Xunit;
+using System.Globalization;
+using System.Text;
 
 namespace BenchmarkDotNet.Tests.Exporters
 {
@@ -16,7 +13,7 @@ namespace BenchmarkDotNet.Tests.Exporters
             string expected =
                 "Start " +
                 "MockSource " +
-                    "IsValid True IsValid "+
+                    "IsValid True IsValid " +
                     "IntNumber 42 IntNumber " +
                     $"DoubleNumber {double.MaxValue.ToString(CultureInfo.InvariantCulture)} DoubleNumber " +
                     $"LongNumber {long.MaxValue} LongNumber " +
@@ -94,17 +91,17 @@ namespace BenchmarkDotNet.Tests.Exporters
         [Fact]
         public void CtorThrowsWhenParameterIsNull()
         {
-            Assert.Throws<ArgumentNullException>(() => XmlSerializer.GetBuilder(null).Build());
+            Assert.Throws<ArgumentNullException>(() => XmlSerializer.GetBuilder(null!).Build());
         }
 
         [Theory]
         [InlineData(null, typeof(ArgumentException))]
         [InlineData(" ", typeof(ArgumentException))]
         [InlineData("", typeof(ArgumentException))]
-        public void WithRootNameThrowsGivenNameIsNullOrWhiteSpace(string name, Type exception)
+        public void WithRootNameThrowsGivenNameIsNullOrWhiteSpace(string? name, Type exception)
         {
             Assert.Throws(exception, () => XmlSerializer.GetBuilder(typeof(MockSource))
-                                                    .WithRootName(name)
+                                                    .WithRootName(name!)
                                                     .Build());
         }
 
@@ -116,10 +113,10 @@ namespace BenchmarkDotNet.Tests.Exporters
         [InlineData(null, "MockItem", typeof(ArgumentException))]
         [InlineData(" ", "MockItem", typeof(ArgumentException))]
         [InlineData("", "MockItem", typeof(ArgumentException))]
-        public void WithCollectionItemNameThrowsGivenInvalidArguments(string collectionName, string itemName, Type exception)
+        public void WithCollectionItemNameThrowsGivenInvalidArguments(string? collectionName, string? itemName, Type exception)
         {
             Assert.Throws(exception, () => XmlSerializer.GetBuilder(typeof(MockSource))
-                                                    .WithCollectionItemName(collectionName, itemName)
+                                                    .WithCollectionItemName(collectionName!, itemName!)
                                                     .Build());
         }
 
@@ -127,10 +124,10 @@ namespace BenchmarkDotNet.Tests.Exporters
         [InlineData(null, typeof(ArgumentException))]
         [InlineData(" ", typeof(ArgumentException))]
         [InlineData("", typeof(ArgumentException))]
-        public void WithExcludedPropertyThrowsGivenNameIsNullOrWhiteSpace(string name, Type exception)
+        public void WithExcludedPropertyThrowsGivenNameIsNullOrWhiteSpace(string? name, Type exception)
         {
             Assert.Throws(exception, () => XmlSerializer.GetBuilder(typeof(MockSource))
-                                                    .WithExcludedProperty(name)
+                                                    .WithExcludedProperty(name!)
                                                     .Build());
         }
 
@@ -166,9 +163,9 @@ namespace BenchmarkDotNet.Tests.Exporters
 
         private static readonly Dictionary<string, SerializeTestData> SerializeTestDataItems = new Dictionary<string, SerializeTestData>
         {
-            {"Null", new SerializeTestData(null, null, typeof(ArgumentNullException))},
-            {"MockSource", new SerializeTestData(null, new MockSource(), typeof(ArgumentNullException))},
-            {"MockXmlWriter", new SerializeTestData(new MockXmlWriter(), null, typeof(ArgumentNullException))}
+            {"Null", new SerializeTestData(null!, null!, typeof(ArgumentNullException))},
+            {"MockSource", new SerializeTestData(null!, new MockSource(), typeof(ArgumentNullException))},
+            {"MockXmlWriter", new SerializeTestData(new MockXmlWriter(), null!, typeof(ArgumentNullException))}
         };
 
         [UsedImplicitly]
@@ -181,7 +178,7 @@ namespace BenchmarkDotNet.Tests.Exporters
             IXmlSerializer serializer = XmlSerializer.GetBuilder(typeof(SimpleItemSource)).Build();
 
             serializer.Serialize(writer, new SimpleItemSource());
-            string actual = writer.ToString();
+            string? actual = writer.ToString();
 
             Assert.Contains("Item s1 Item", actual);
             Assert.Contains("Item s2 Item", actual);
@@ -194,7 +191,7 @@ namespace BenchmarkDotNet.Tests.Exporters
             IXmlSerializer serializer = XmlSerializer.GetBuilder(typeof(UnwriteableCollectionSource)).Build();
 
             serializer.Serialize(writer, new UnwriteableCollectionSource());
-            string actual = writer.ToString();
+            string actual = writer.ToString()!;
 
             Assert.DoesNotContain(actual, "Items");
         }
@@ -206,29 +203,29 @@ namespace BenchmarkDotNet.Tests.Exporters
             public double DoubleNumber { get; } = double.MaxValue;
             public long LongNumber { get; } = long.MaxValue;
             public string Name { get; } = "Source";
-            public IEnumerable<MockCollectionItem> Items { get; }
-                = new List<MockCollectionItem>
-                {
-                    new MockCollectionItem("i1"), new MockCollectionItem("i2")
-                };
-            public double[] DoubleArray { get; } = new double[] { 1, 2 };
+            public IEnumerable<MockCollectionItem> Items { get; } =
+                [
+                    new MockCollectionItem("i1"),
+                    new MockCollectionItem("i2"),
+                ];
+            public double[] DoubleArray { get; } = [1, 2];
         }
 
         private class SimpleItemSource
         {
-            public IEnumerable<string> Items { get; } = new List<string> { "s1", "s2" };
+            public IEnumerable<string> Items { get; } = ["s1", "s2"];
         }
 
         private class UnwriteableCollectionSource
         {
-            public IEnumerable<string> Items { get; }
+            public IEnumerable<string> Items { get; } = [];
         }
 
         private class MockCollectionItem
         {
             public string Name { get; }
 
-            public MockCollectionItem(string name) { Name = name;  }
+            public MockCollectionItem(string name) { Name = name; }
         }
 
         public class MockXmlWriter : IXmlWriter
@@ -244,11 +241,11 @@ namespace BenchmarkDotNet.Tests.Exporters
             public void WriteElementString(string localName, string value)
             {
                 writer.Append(localName);
-                writer.Append(" ");
+                writer.Append(' ');
                 writer.Append(value);
-                writer.Append(" ");
+                writer.Append(' ');
                 writer.Append(localName);
-                writer.Append(" ");
+                writer.Append(' ');
             }
 
             public void WriteEndDocument()
@@ -260,14 +257,14 @@ namespace BenchmarkDotNet.Tests.Exporters
             {
                 var endElement = openElements.Pop();
                 writer.Append(endElement);
-                writer.Append(" ");
+                writer.Append(' ');
             }
 
             public void WriteStartElement(string localName)
             {
                 openElements.Push(localName);
                 writer.Append(localName);
-                writer.Append(" ");
+                writer.Append(' ');
             }
 
             public override string ToString() => writer.ToString();

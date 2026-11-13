@@ -1,10 +1,7 @@
-﻿using System;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Tests.Mocks;
 using Perfolizer.Horology;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.Tests.Engine
 {
@@ -46,8 +43,10 @@ namespace BenchmarkDotNet.Tests.Engine
                 Infrastructure = { Clock = new MockClock(clockFrequency) },
                 Accuracy = { MaxRelativeError = maxRelativeError }
             }.Freeze();
-            var stage = CreateStage(job, data => data.InvokeCount * operationTime);
-            long invokeCount = stage.Run().PerfectInvocationCount;
+            var engine = new MockEngine(output, job, data => data.invokeCount * operationTime);
+            var pilotStage = EnginePilotStage.GetStage(1, 1, 1, engine.Parameters);
+            engine.Run(pilotStage);
+            var invokeCount = pilotStage.invokeCount;
             output.WriteLine($"InvokeCount = {invokeCount} (Min= {minInvokeCount}, Max = {MaxPossibleInvokeCount})");
             Assert.InRange(invokeCount, minInvokeCount, MaxPossibleInvokeCount);
         }
@@ -59,16 +58,12 @@ namespace BenchmarkDotNet.Tests.Engine
                 Infrastructure = { Clock = new MockClock(Frequency.MHz) },
                 Run = { IterationTime = iterationTime }
             }.Freeze();
-            var stage = CreateStage(job, data => data.InvokeCount * operationTime);
-            long invokeCount = stage.Run().PerfectInvocationCount;
+            var engine = new MockEngine(output, job, data => data.invokeCount * operationTime);
+            var pilotStage = EnginePilotStage.GetStage(1, 1, 1, engine.Parameters);
+            engine.Run(pilotStage);
+            var invokeCount = pilotStage.invokeCount;
             output.WriteLine($"InvokeCount = {invokeCount} (Min= {minInvokeCount}, Max = {maxInvokeCount})");
             Assert.InRange(invokeCount, minInvokeCount, maxInvokeCount);
-        }
-
-        private EnginePilotStage CreateStage(Job job, Func<IterationData, TimeInterval> measure)
-        {
-            var engine = new MockEngine(output, job, measure);
-            return new EnginePilotStage(engine);
         }
     }
 }

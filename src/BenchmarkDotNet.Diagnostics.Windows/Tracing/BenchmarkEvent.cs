@@ -1,6 +1,5 @@
-﻿using System;
-using System.Text;
 using Microsoft.Diagnostics.Tracing;
+using System.Text;
 
 namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
 {
@@ -19,10 +18,10 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
         protected override Delegate Target
         {
             get => target;
-            set => target = (Action<BenchmarkEvent>)value;
+            set => target = (Action<BenchmarkEvent>) value;
         }
 
-        public override string[] PayloadNames => payloadNames ?? (payloadNames = new[] { nameof(BenchmarkName) });
+        public override string[] PayloadNames => payloadNames ?? (payloadNames = [nameof(BenchmarkName)]);
 
         public override StringBuilder ToXml(StringBuilder sb)
         {
@@ -33,7 +32,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
             return sb;
         }
 
-        public override object PayloadValue(int index) => index == 0 ? BenchmarkName : null;
+        public override object? PayloadValue(int index) => index == 0 ? BenchmarkName : null;
 
         protected override void Dispatch() => target?.Invoke(this);
     }

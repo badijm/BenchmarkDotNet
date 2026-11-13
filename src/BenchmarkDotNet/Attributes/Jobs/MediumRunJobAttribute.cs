@@ -1,4 +1,3 @@
-﻿using System;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
 
@@ -15,7 +14,7 @@ namespace BenchmarkDotNet.Attributes
         /// defines a new MediumRun Job that targets specified Framework
         /// </summary>
         /// <param name="runtimeMoniker">Target Framework to test.</param>
-        public MediumRunJobAttribute(RuntimeMoniker runtimeMoniker)
+        public MediumRunJobAttribute(string runtimeMoniker)
             : base(GetJob(Job.MediumRun, runtimeMoniker, null, null))
         {
         }
@@ -26,7 +25,7 @@ namespace BenchmarkDotNet.Attributes
         /// <param name="runtimeMoniker">Target Framework to test.</param>
         /// <param name="jit">Jit to test.</param>
         /// <param name="platform">Platform to test.</param>
-        public MediumRunJobAttribute(RuntimeMoniker runtimeMoniker, Jit jit, Platform platform)
+        public MediumRunJobAttribute(string runtimeMoniker, Jit jit, Platform platform)
             : base(GetJob(Job.MediumRun, runtimeMoniker, jit, platform))
         {
         }

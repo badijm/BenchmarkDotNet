@@ -1,11 +1,10 @@
-﻿#if NETFRAMEWORK
-using System;
-using System.Collections.Generic;
-using System.Linq;
+#if NETFRAMEWORK
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Diagnostics.Windows.Tracing;
 using BenchmarkDotNet.Engines;
-using Xunit;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace BenchmarkDotNet.IntegrationTests.Diagnosers
 {
@@ -18,7 +17,7 @@ namespace BenchmarkDotNet.IntegrationTests.Diagnosers
 
             sut.HandleIterationEvent(0, IterationMode.Overhead, 100); // start but no stop later on
 
-            Assert.Throws<InvalidOperationException>(() => sut.CalculateMetrics(null, Array.Empty<PreciseMachineCounter>()));
+            Assert.Throws<InvalidOperationException>(() => sut.CalculateMetrics(null!, []));
         }
 
         [Fact]
@@ -63,8 +62,8 @@ namespace BenchmarkDotNet.IntegrationTests.Diagnosers
             }
 
             var metrics = sut.CalculateMetrics(
-                new Dictionary<int, int> { {profileSourceId, interval }},
-                new[]{ new PreciseMachineCounter(profileSourceId, "test", HardwareCounter.InstructionRetired, interval), });
+                new Dictionary<int, int> { { profileSourceId, interval } },
+                [new PreciseMachineCounter(profileSourceId, "test", HardwareCounter.InstructionRetired, interval),]);
 
             const ulong expected = (4 * interval - interval) / totalOperations; // every workload was 4 events, the overhead was one and totalOperations times per iteration
 

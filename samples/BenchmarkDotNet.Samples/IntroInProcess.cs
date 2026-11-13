@@ -1,9 +1,9 @@
-﻿using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
+using System.Runtime.CompilerServices;
 
 namespace BenchmarkDotNet.Samples
 {
@@ -22,7 +22,7 @@ namespace BenchmarkDotNet.Samples
 
                 AddJob(Job.MediumRun
                     .WithLaunchCount(1)
-                    .WithToolchain(InProcessEmitToolchain.Instance)
+                    .WithToolchain(InProcessEmitToolchain.Default)
                     .WithId("InProcess"));
             }
         }

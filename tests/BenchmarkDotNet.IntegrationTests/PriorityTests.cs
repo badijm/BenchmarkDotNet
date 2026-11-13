@@ -1,9 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Tests.Loggers;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -72,10 +67,10 @@ namespace BenchmarkDotNet.IntegrationTests
                 yield return new object[] { 1, 2 };
             }
 
-            public IEnumerable<int> NumberParams => new int[]
-            {
+            public IEnumerable<int> NumberParams =>
+            [
                 50
-            };
+            ];
         }
     }
 }

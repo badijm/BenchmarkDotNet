@@ -1,4 +1,3 @@
-﻿using System;
 using BenchmarkDotNet.Characteristics;
 using BenchmarkDotNet.Jobs;
 using Perfolizer.Horology;
@@ -32,8 +31,9 @@ namespace BenchmarkDotNet.Engines
             Register(AccuracyMode.MaxRelativeErrorCharacteristic, () => 0.02);
             Register(AccuracyMode.MinIterationTimeCharacteristic, () => TimeInterval.Millisecond * 500);
             Register(AccuracyMode.MinInvokeCountCharacteristic, () => 4);
-            Register(AccuracyMode.EvaluateOverheadCharacteristic, () => true);
+            Register(AccuracyMode.EvaluateOverheadCharacteristic, () => false);
             Register(RunMode.MemoryRandomizationCharacteristic, () => false);
+            Register(RunMode.JitTieringModeCharacteristic, () => JitTieringMode.Auto);
             Register(AccuracyMode.OutlierModeCharacteristic, job =>
             {
                 // if Memory Randomization was enabled and the benchmark is truly multimodal

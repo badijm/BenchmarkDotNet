@@ -1,6 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Loggers;
 
 namespace BenchmarkDotNet.Analysers
@@ -10,14 +7,14 @@ namespace BenchmarkDotNet.Analysers
         public static void Print(ILogger logger, IEnumerable<Conclusion> conclusions)
         {
             PrintFiltered(conclusions, ConclusionKind.Error, "Errors", logger.WriteLineError);
-            PrintFiltered(conclusions, ConclusionKind.Warning, "Warnings", logger.WriteLineError);
+            PrintFiltered(conclusions, ConclusionKind.Warning, "Warnings", logger.WriteLineWarning);
             PrintFiltered(conclusions, ConclusionKind.Hint, "Hints", logger.WriteLineHint);
         }
 
         private static void PrintFiltered(IEnumerable<Conclusion> conclusions, ConclusionKind kind, string title, Action<string> printLine)
         {
             var filtered = conclusions.Where(c => c.Kind == kind).ToArray();
-            if (filtered.Any())
+            if (filtered.Length != 0)
             {
                 printLine("");
                 printLine($"// * {title} *");

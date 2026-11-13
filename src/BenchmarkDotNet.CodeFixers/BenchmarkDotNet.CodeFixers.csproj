@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\build\common.props" />
+  <PropertyGroup>
+    <SignAssembly>false</SignAssembly>
+    <PackageId>BenchmarkDotNet.CodeFixers</PackageId>
+  </PropertyGroup>
+  <Import Project="..\..\build\roslynBands.props" />
+  <ItemGroup>
+      <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="$(MccPackageVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\BenchmarkDotNet.Analyzers\BenchmarkDotNet.Analyzers.csproj" />
+  </ItemGroup>
+  <Import Project="..\..\build\common.targets" />
+</Project>

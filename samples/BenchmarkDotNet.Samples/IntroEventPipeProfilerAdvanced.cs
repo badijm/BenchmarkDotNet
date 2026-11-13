@@ -1,5 +1,3 @@
-﻿using System.Buffers;
-using System.Diagnostics.Tracing;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
@@ -7,6 +5,8 @@ using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
 using Microsoft.Diagnostics.NETCore.Client;
 using Microsoft.Diagnostics.Tracing.Parsers;
+using System.Buffers;
+using System.Diagnostics.Tracing;
 
 namespace BenchmarkDotNet.Samples
 {

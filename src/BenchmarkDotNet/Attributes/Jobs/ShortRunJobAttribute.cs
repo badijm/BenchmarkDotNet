@@ -1,11 +1,10 @@
-﻿using System;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
 
 namespace BenchmarkDotNet.Attributes
 {
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Assembly, AllowMultiple = true)]
-    public class ShortRunJobAttribute: JobConfigBaseAttribute
+    public class ShortRunJobAttribute : JobConfigBaseAttribute
     {
         public ShortRunJobAttribute() : base(Job.ShortRun)
         {
@@ -15,7 +14,7 @@ namespace BenchmarkDotNet.Attributes
         /// defines a new ShortRun Job that targets specified Framework
         /// </summary>
         /// <param name="runtimeMoniker">Target Framework to test.</param>
-        public ShortRunJobAttribute(RuntimeMoniker runtimeMoniker)
+        public ShortRunJobAttribute(string runtimeMoniker)
             : base(GetJob(Job.ShortRun, runtimeMoniker, null, null))
         {
         }
@@ -26,7 +25,7 @@ namespace BenchmarkDotNet.Attributes
         /// <param name="runtimeMoniker">Target Framework to test.</param>
         /// <param name="jit">Jit to test.</param>
         /// <param name="platform">Platform to test.</param>
-        public ShortRunJobAttribute(RuntimeMoniker runtimeMoniker, Jit jit, Platform platform)
+        public ShortRunJobAttribute(string runtimeMoniker, Jit jit, Platform platform)
             : base(GetJob(Job.ShortRun, runtimeMoniker, jit, platform))
         {
         }

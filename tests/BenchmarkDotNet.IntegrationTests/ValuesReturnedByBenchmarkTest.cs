@@ -1,14 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Toolchains;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
-using Xunit;
-using Xunit.Abstractions;
+using System.Collections.Immutable;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -16,13 +12,13 @@ namespace BenchmarkDotNet.IntegrationTests
     {
         public ValuesReturnedByBenchmarkTest(ITestOutputHelper output) : base(output) { }
 
-        public static IEnumerable<object[]> GetToolchains() => new[]
-        {
-            new object[] { Job.Default.GetToolchain() },
-            new object[] { InProcessEmitToolchain.Instance },
-        };
+        public static IEnumerable<object[]> GetToolchains() =>
+        [
+            [Job.Default.GetToolchain()],
+            [InProcessEmitToolchain.Default],
+        ];
 
-        [Theory, MemberData(nameof(GetToolchains))]
+        [Theory, MemberData(nameof(GetToolchains), DisableDiscoveryEnumeration = true)]
         public void AnyValueCanBeReturned(IToolchain toolchain) => CanExecute<ValuesReturnedByBenchmark>(ManualConfig.CreateEmpty().AddJob(Job.Dry.WithToolchain(toolchain)));
 
         public class ValuesReturnedByBenchmark
@@ -36,7 +32,7 @@ namespace BenchmarkDotNet.IntegrationTests
 #endif
 
             [Benchmark]
-            public object ReturnNullForReferenceType() => null;
+            public object? ReturnNullForReferenceType() => null;
 
             [Benchmark]
             public object ReturnNotNullForReferenceType() => new object();
@@ -79,10 +75,10 @@ namespace BenchmarkDotNet.IntegrationTests
             public ref readonly ReadOnlyStruct ReturnReadOnlyStructByReadonlyRef() => ref readOnlyStructField;
 
             [Benchmark]
-            public Span<byte> ReturnStackOnlyType() => new Span<byte>(Array.Empty<byte>());
+            public Span<byte> ReturnStackOnlyType() => new Span<byte>([]);
 
             [Benchmark]
-            public ImmutableArray<int> TypeFromNetStandardNuGetPackage() => ImmutableArray<int>.Empty;
+            public ImmutableArray<int> TypeFromNetStandardNuGetPackage() => [];
 
             [Benchmark]
             public ValueTuple<int> TypeInTwoDlls() => new ValueTuple<int>();
@@ -109,7 +105,12 @@ namespace BenchmarkDotNet.IntegrationTests
             public unsafe void* PointerToAnything() => System.IntPtr.Zero.ToPointer();
 
             [Benchmark]
-            public unsafe int* PointerToUnmanagedType() => (int*)System.IntPtr.Zero.ToPointer();
+            public unsafe int* PointerToUnmanagedType() => (int*) System.IntPtr.Zero.ToPointer();
+
+            [Benchmark]
+            public unsafe delegate*<int, int> FunctionPointer() => &ReturnArgument;
+
+            private static int ReturnArgument(int value) => value;
 
             [Benchmark]
             public System.IntPtr IntPtr() => System.IntPtr.Zero;

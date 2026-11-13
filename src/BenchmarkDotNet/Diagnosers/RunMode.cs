@@ -1,5 +1,8 @@
-﻿namespace BenchmarkDotNet.Diagnosers
+using JetBrains.Annotations;
+
+namespace BenchmarkDotNet.Diagnosers
 {
+    [UsedImplicitly]
     public enum RunMode : byte
     {
         /// <summary>
@@ -10,6 +13,10 @@
         /// needs extra run of the benchmark
         /// </summary>
         ExtraRun,
+        /// <summary>
+        /// needs a single extra iteration of the benchmark
+        /// </summary>
+        ExtraIteration,
         /// <summary>
         /// no overhead, can be executed without extra run
         /// </summary>

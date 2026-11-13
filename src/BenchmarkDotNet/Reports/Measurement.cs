@@ -1,11 +1,11 @@
-﻿using System;
+#if DEBUG
 using System.Diagnostics;
+#endif
 using System.Globalization;
-using System.Linq;
 using System.Text;
 using BenchmarkDotNet.Engines;
+using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Helpers;
-using BenchmarkDotNet.Loggers;
 using Perfolizer.Horology;
 
 namespace BenchmarkDotNet.Reports
@@ -24,7 +24,7 @@ namespace BenchmarkDotNet.Reports
         private static Measurement Error() => new Measurement(-1, IterationMode.Unknown, IterationStage.Unknown, 0, 0, 0);
 
         private static readonly int IterationInfoNameMaxWidth
-            = Enum.GetNames(typeof(IterationMode)).Max(text => text.Length) + Enum.GetNames(typeof(IterationStage)).Max(text => text.Length);
+            = Enum.GetNames<IterationMode>().Max(text => text.Length) + Enum.GetNames<IterationStage>().Max(text => text.Length);
 
         public IterationMode IterationMode { get; }
 
@@ -96,7 +96,7 @@ namespace BenchmarkDotNet.Reports
             builder.Append(NsSymbol);
             builder.Append(", ");
 
-            builder.Append(GetAverageTime().ToString(MainCultureInfo).ToAscii());
+            builder.Append(GetAverageTime().ToDefaultString("0.0000").ToAscii());
             builder.Append("/op");
 
             return builder.ToString();
@@ -118,15 +118,15 @@ namespace BenchmarkDotNet.Reports
         // ReSharper disable once UnusedParameter.Global
         public static Measurement Parse(string line, int processIndex)
         {
-            if (string.IsNullOrWhiteSpace(line) || line.StartsWith(GcStats.ResultsLinePrefix))
+            if (line.IsBlank() || line.StartsWith(GcStats.ResultsLinePrefix))
                 return Error();
 
             try
             {
-                var lineSplit = line.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
+                var lineSplit = line.Split([':'], StringSplitOptions.RemoveEmptyEntries);
 
                 string iterationInfo = lineSplit[0];
-                var iterationInfoSplit = iterationInfo.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                var iterationInfoSplit = iterationInfo.Split([' '], StringSplitOptions.RemoveEmptyEntries);
                 int iterationStageIndex = 0;
                 for (int i = 1; i < iterationInfoSplit[0].Length; i++)
                     if (char.IsUpper(iterationInfoSplit[0][i]))
@@ -143,12 +143,12 @@ namespace BenchmarkDotNet.Reports
                 int.TryParse(iterationInfoSplit[1], out int iterationIndex);
 
                 string measurementsInfo = lineSplit[1];
-                var measurementsInfoSplit = measurementsInfo.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                var measurementsInfoSplit = measurementsInfo.Split([','], StringSplitOptions.RemoveEmptyEntries);
                 long op = 1L;
                 double ns = double.PositiveInfinity;
                 foreach (string item in measurementsInfoSplit)
                 {
-                    var measurementSplit = item.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                    var measurementSplit = item.Split([' '], StringSplitOptions.RemoveEmptyEntries);
                     string value = measurementSplit[0];
                     string unit = measurementSplit[1];
                     switch (unit)

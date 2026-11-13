@@ -1,14 +1,13 @@
-﻿using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Linq;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Exporters;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
+using System.Collections.Immutable;
 
 namespace BenchmarkDotNet.Configs
 {
@@ -21,15 +20,18 @@ namespace BenchmarkDotNet.Configs
         {
             BaselineValidator.FailOnError,
             SetupCleanupValidator.FailOnError,
+            AwaitableAsyncEnumerableAmbiguityValidator.DontFailOnError,
             RunModeValidator.FailOnError,
             DiagnosersValidator.Composite,
             CompilationValidator.FailOnError,
             ConfigValidator.DontFailOnError,
-            ShadowCopyValidator.DontFailOnError,
             JitOptimizationsValidator.DontFailOnError,
             DeferredExecutionValidator.DontFailOnError,
             ParamsAllValuesValidator.FailOnError,
-            ParamsValidator.FailOnError
+            ParamsValidator.FailOnError,
+            RequiredMemberValidator.FailOnError,
+            SourceReturnTypeValidator.FailOnError,
+            BenchmarkCancellationValidator.FailOnError
         };
 
         /// <summary>
@@ -53,6 +55,7 @@ namespace BenchmarkDotNet.Configs
             var uniqueHidingRules = source.GetColumnHidingRules().ToImmutableArray();
 
             var uniqueRunnableJobs = GetRunnableJobs(source.GetJobs()).ToImmutableHashSet();
+            var uniqueEventProcessors = source.GetEventProcessors().ToImmutableHashSet();
 
             return new ImmutableConfig(
                 uniqueColumnProviders,
@@ -66,14 +69,17 @@ namespace BenchmarkDotNet.Configs
                 uniqueRules,
                 uniqueHidingRules,
                 uniqueRunnableJobs,
+                uniqueEventProcessors,
                 source.UnionRule,
-                source.ArtifactsPath ?? DefaultConfig.Instance.ArtifactsPath,
-                source.CultureInfo,
+                source.ArtifactsPath ?? DefaultConfig.Instance.ArtifactsPath!,
+                source.Title,
+                source.CultureInfo ?? DefaultCultureInfo.Instance,
                 source.Orderer ?? DefaultOrderer.Instance,
                 source.CategoryDiscoverer ?? DefaultCategoryDiscoverer.Instance,
                 source.SummaryStyle ?? SummaryStyle.Default,
                 source.Options,
                 source.BuildTimeout,
+                source.WakeLock,
                 configAnalyse.AsReadOnly()
             );
         }
@@ -83,8 +89,7 @@ namespace BenchmarkDotNet.Configs
             var builder = ImmutableHashSet.CreateBuilder(new TypeComparer<IDiagnoser>());
 
             foreach (var diagnoser in diagnosers)
-                if (!builder.Contains(diagnoser))
-                    builder.Add(diagnoser);
+                builder.Add(diagnoser);
 
             if (!uniqueHardwareCounters.IsEmpty && !diagnosers.OfType<IHardwareCountersDiagnoser>().Any())
             {
@@ -109,29 +114,29 @@ namespace BenchmarkDotNet.Configs
                 configAnalyse.Add(conclusion);
             }
 
-            var mergeDictionary = new Dictionary<System.Type, IExporter>();
+            var mergeDictionary = new Dictionary<string, IExporter>();
 
             foreach (var exporter in exporters)
             {
-                var exporterType = exporter.GetType();
-                if (mergeDictionary.ContainsKey(exporterType))
+                var exporterName = exporter.Name;
+                if (mergeDictionary.ContainsKey(exporterName))
                 {
-                    AddWarning($"The exporter {exporterType} is already present in configuration. There may be unexpected results.");
+                    AddWarning($"The exporter {exporterName} is already present in configuration. There may be unexpected results.");
                 }
-                mergeDictionary[exporterType] = exporter;
+                mergeDictionary[exporterName] = exporter;
             }
 
 
             foreach (var diagnoser in uniqueDiagnosers)
                 foreach (var exporter in diagnoser.Exporters)
                 {
-                    var exporterType = exporter.GetType();
-                    if (mergeDictionary.ContainsKey(exporterType))
+                    var exporterName = exporter.Name;
+                    if (mergeDictionary.ContainsKey(exporterName))
                     {
-                        AddWarning($"The exporter {exporterType} of {diagnoser.GetType().Name} is already present in configuration. There may be unexpected results.");
+                        AddWarning($"The exporter {exporterName} of {diagnoser.GetType().Name} is already present in configuration. There may be unexpected results.");
                     }
-                    mergeDictionary[exporterType] = exporter;
-                };
+                    mergeDictionary[exporterName] = exporter;
+                }
 
             var result = mergeDictionary.Values.ToList();
 
@@ -143,7 +148,7 @@ namespace BenchmarkDotNet.Configs
             if (hardwareCounterDiagnoser != default(IHardwareCountersDiagnoser) && disassemblyDiagnoser != default(DisassemblyDiagnoser))
                 result.Add(new InstructionPointerExporter(hardwareCounterDiagnoser, disassemblyDiagnoser));
 
-            for (int i = result.Count - 1; i >=0; i--)
+            for (int i = result.Count - 1; i >= 0; i--)
                 if (result[i] is IExporterDependencies exporterDependencies)
                     foreach (var dependency in exporterDependencies.Dependencies)
                         /*
@@ -165,7 +170,7 @@ namespace BenchmarkDotNet.Configs
                          *  "The CsvMeasurementsExporter is already present in the configuration. There may be unexpected results of RPlotExporter.
                          *
                          */
-                        if (!result.Any(exporter=> exporter.GetType() == dependency.GetType()))
+                        if (!result.Any(exporter => exporter.GetType() == dependency.GetType()))
                             result.Insert(i, dependency); // All the exporter dependencies should be added before the exporter
                         else
                         {
@@ -182,12 +187,10 @@ namespace BenchmarkDotNet.Configs
             var builder = ImmutableHashSet.CreateBuilder<IAnalyser>();
 
             foreach (var analyser in analysers)
-                if (!builder.Contains(analyser))
-                    builder.Add(analyser);
+                builder.Add(analyser);
 
             foreach (var diagnoser in uniqueDiagnosers)
-            foreach (var analyser in diagnoser.Analysers)
-                if (!builder.Contains(analyser))
+                foreach (var analyser in diagnoser.Analysers)
                     builder.Add(analyser);
 
             return builder.ToImmutable();
@@ -218,7 +221,10 @@ namespace BenchmarkDotNet.Configs
         /// </summary>
         private static IReadOnlyList<Job> GetRunnableJobs(IEnumerable<Job> jobs)
         {
-            var unique = jobs.Distinct(JobComparer.Instance).ToArray();
+            // JobComparer ignores the categories, so jobs that differ only by category collapse into one here. Their
+            // categories are merged into the survivor, otherwise selecting by the categories of the collapsed jobs
+            // would silently match nothing.
+            var unique = jobs.GroupBy(job => job, JobComparer.Default).Select(MergeCategories).ToArray();
             var result = new List<Job>();
 
             foreach (var standardJob in unique.Where(job => !job.Meta.IsMutator && !job.Meta.IsDefault))
@@ -227,7 +233,7 @@ namespace BenchmarkDotNet.Configs
             var customDefaultJob = unique.SingleOrDefault(job => job.Meta.IsDefault);
             var defaultJob = customDefaultJob ?? Job.Default;
 
-            if (!result.Any())
+            if (result.Count == 0)
                 result.Add(defaultJob);
 
             foreach (var mutatorJob in unique.Where(job => job.Meta.IsMutator))
@@ -236,21 +242,109 @@ namespace BenchmarkDotNet.Configs
                 {
                     var copy = result[i].UnfreezeCopy();
 
+                    // Apply overwrites the characteristics, but the categories are additive: a mutator that carries
+                    // categories adds them to every job it mutates instead of replacing the ones that job already
+                    // has. Dropping them would make selecting by the categories of the mutated job silently match
+                    // nothing. Only the fluent api can produce such a mutator (eg Job.Default.WithWarmupCount(2)
+                    // .WithCategory("ci").AsMutator()): the mutator attributes derive from
+                    // JobMutatorConfigBaseAttribute, which has no Categories property.
+                    var ownCategories = copy.Meta.Categories;
+
                     copy.Apply(mutatorJob);
+                    ApplyCouplingFromMutator(copy, mutatorJob);
+
+                    copy.Meta.Categories = [.. ownCategories, .. copy.Meta.Categories];
 
                     result[i] = copy.Freeze();
                 }
             }
 
-            return result;
+            // Deduplicated again: the pass at the top of this method runs before the mutators are merged, so it
+            // cannot see jobs that only become identical here. The categories are merged rather than dropped for
+            // the same reason as in the first pass: the comparer ignores them, so the jobs collapsed here can carry
+            // categories the survivor does not have, and selecting by one of those would then match nothing.
+            return result
+                .Select(ReconcileRuntimeAndToolchain)
+                .GroupBy(job => job, JobComparer.Default)
+                .Select(MergeCategories)
+                .ToArray();
+        }
+
+        /// <summary>
+        /// Re-applies the Runtime/Toolchain coupling in the direction the mutator asked for.
+        /// </summary>
+        /// <remarks>
+        /// <c>Apply</c> writes characteristics directly, past the <see cref="InfrastructureMode" /> setters that keep
+        /// the pair in sync, so a merged job can end up with the two disagreeing. The mutator is the later and more
+        /// specific instruction, so whichever of them it set wins - as it would through the setters.
+        /// </remarks>
+        private static void ApplyCouplingFromMutator(Job job, Job mutatorJob)
+        {
+            if (mutatorJob.Infrastructure.HasValue(InfrastructureMode.ToolchainCharacteristic))
+                InfrastructureMode.RuntimeCharacteristic[job.Infrastructure] = job.Infrastructure.Toolchain?.Runtime;
+            else if (mutatorJob.Infrastructure.HasValue(InfrastructureMode.RuntimeCharacteristic))
+                InfrastructureMode.ToolchainCharacteristic[job.Infrastructure] = null;
+        }
+
+        /// <summary>
+        /// Keeps a job's Runtime in sync with an explicitly set Toolchain, where nothing says which was meant to win.
+        /// </summary>
+        /// <remarks>
+        /// The public characteristic indexers write past the setters too. With no mutator to say which assignment came
+        /// later, the toolchain wins: it is what builds and runs the benchmark, so a stale runtime would report one
+        /// nothing ran on.
+        /// </remarks>
+        private static Job ReconcileRuntimeAndToolchain(Job job)
+        {
+            var toolchain = job.Infrastructure.Toolchain;
+            if (toolchain == null || Equals(job.Infrastructure.Runtime, toolchain.Runtime))
+                return job;
+
+            var copy = job.UnfreezeCopy();
+            InfrastructureMode.RuntimeCharacteristic[copy.Infrastructure] = toolchain.Runtime;
+            return copy.Freeze();
+        }
+
+        /// <summary>
+        /// Returns the first job of a group of jobs which are equal except for their categories,
+        /// carrying the categories of all of them.
+        /// </summary>
+        private static Job MergeCategories(IGrouping<Job, Job> equalJobs)
+        {
+            var first = equalJobs.Key;
+
+            // The categories are deduplicated the same way the Meta.Categories setter does it, so that the count
+            // below compares like with like: without it a group whose jobs carry the very same categories (or the
+            // same ones in a different casing) would look like it had something to merge and take the copying path.
+            var merged = equalJobs.SelectMany(job => job.Meta.Categories).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+            // The merged set always contains the categories of the first job, so an equal count means it contains
+            // nothing else and the job can be returned as it is. This is the common case: a group of one.
+            if (merged.Length == first.Meta.Categories.Count)
+                return first;
+
+            // WithCategories copies the job through Apply, which skips the characteristics that are ignored on apply.
+            // IsMutator is one of them, so it has to be restored explicitly: a mutator that loses the flag here is
+            // added to the config as an extra standalone job and is never applied to the jobs it was meant to mutate.
+            var mergedJob = first.WithCategories(merged);
+
+            return (first.Meta.IsMutator ? mergedJob.AsMutator() : mergedJob).Freeze();
         }
 
         private class TypeComparer<TInterface> : IEqualityComparer<TInterface>
         {
             // different types can implement the same interface, we want to distinct by type
-            public bool Equals(TInterface x, TInterface y) => x.GetType() == y.GetType();
+            public bool Equals(TInterface? x, TInterface? y)
+            {
+                if (ReferenceEquals(x, y))
+                    return true;
+                if (x is null || y is null)
+                    return false;
 
-            public int GetHashCode(TInterface obj) => obj.GetType().GetHashCode();
+                return x.GetType() == y.GetType();
+            }
+
+            public int GetHashCode(TInterface obj) => obj?.GetType().GetHashCode() ?? 0;
         }
     }
 }

@@ -1,35 +1,43 @@
-﻿using System;
-using JetBrains.Annotations;
+using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.Portability;
 
 namespace BenchmarkDotNet.Toolchains.InProcess.Emit
 {
-    [PublicAPI]
-    public class InProcessEmitToolchain : Toolchain
+    /// <summary>
+    /// An <see cref="IToolchain"/> to run the benchmarks in-process by emitting IL.
+    /// </summary>
+    public sealed class InProcessEmitToolchain : Toolchain
     {
-        /// <summary>The default toolchain instance.</summary>
-        public static readonly IToolchain Instance = new InProcessEmitToolchain(true);
+        public static readonly InProcessEmitToolchain Default = new(RuntimeInformation.GetCurrentRuntime(), InProcessEmitSettings.Default);
 
-        /// <summary>The toolchain instance without output logging.</summary>
-        public static readonly IToolchain DontLogOutput = new InProcessEmitToolchain(false);
-
-        /// <summary>Initializes a new instance of the <see cref="InProcessEmitToolchain" /> class.</summary>
-        /// <param name="logOutput"><c>true</c> if the output should be logged.</param>
-        public InProcessEmitToolchain(bool logOutput) :
-            this(TimeSpan.Zero, logOutput)
-        { }
-
-        /// <summary>Initializes a new instance of the <see cref="InProcessEmitToolchain" /> class.</summary>
-        /// <param name="timeout">Timeout for the run.</param>
-        /// <param name="logOutput"><c>true</c> if the output should be logged.</param>
-        public InProcessEmitToolchain(TimeSpan timeout, bool logOutput) :
-            base(
-                nameof(InProcessEmitToolchain),
-                new InProcessEmitGenerator(),
-                new InProcessEmitBuilder(),
-                new InProcessEmitExecutor(timeout, logOutput))
-        {
-        }
+        private readonly InProcessEmitSettings settings;
 
         public override bool IsInProcess => true;
+
+        private InProcessEmitToolchain(Runtime runtime, InProcessEmitSettings settings) : base(
+            nameof(InProcessEmitToolchain),
+            runtime,
+            new InProcessEmitBuilder(),
+            new InProcessEmitExecutor(settings.ExecuteOnSeparateThread))
+        {
+            this.settings = settings;
+        }
+
+        /// <summary>Returns an in-process toolchain for the given settings, associated with the current runtime.</summary>
+        public static InProcessEmitToolchain From(InProcessEmitSettings settings)
+            => From(RuntimeInformation.GetCurrentRuntime(), settings);
+
+        /// <summary>Returns an in-process toolchain for the given runtime and settings.</summary>
+        public static InProcessEmitToolchain From(Runtime runtime, InProcessEmitSettings settings)
+            => runtime.Equals(Default.Runtime) && settings.Equals(InProcessEmitSettings.Default)
+            ? Default
+            : new(runtime, settings);
+
+        public override bool Equals(object? obj)
+            => obj is InProcessEmitToolchain other
+            && Runtime.Equals(other.Runtime)
+            && settings.Equals(other.settings);
+
+        public override int GetHashCode() => HashCode.Combine(Runtime, settings);
     }
 }

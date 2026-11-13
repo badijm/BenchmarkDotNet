@@ -1,263 +1,117 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Threading.Tasks;
-using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Running;
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 
-namespace BenchmarkDotNet.Validators
+namespace BenchmarkDotNet.Validators;
+
+public abstract class ExecutionValidatorBase : IValidator
 {
-    public abstract class ExecutionValidatorBase : IValidator
+    protected ExecutionValidatorBase(bool failOnError)
     {
-        protected ExecutionValidatorBase(bool failOnError)
+        TreatsWarningsAsErrors = failOnError;
+    }
+
+    public bool TreatsWarningsAsErrors { get; }
+
+    public IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters)
+        => ValidateAsyncCore(validationParameters);
+
+    protected abstract IAsyncEnumerable<ValidationError> ValidateAsyncCore(ValidationParameters validationParameters, CancellationToken cancellationToken = default);
+
+    protected bool TryCreateBenchmarkTypeInstance(Type type, List<ValidationError> errors, CancellationToken cancellationToken, [NotNullWhen(true)] out object? instance)
+    {
+        try
         {
-            TreatsWarningsAsErrors = failOnError;
-        }
-
-        public bool TreatsWarningsAsErrors { get; }
-
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters)
-        {
-            var errors = new List<ValidationError>();
-
-            foreach (var typeGroup in validationParameters.Benchmarks.GroupBy(benchmark => benchmark.Descriptor.Type))
-            {
-                if (!TryCreateBenchmarkTypeInstance(typeGroup.Key, errors, out var benchmarkTypeInstance))
-                {
-                    continue;
-                }
-
-                if (!TryToSetParamsFields(benchmarkTypeInstance, errors))
-                {
-                    continue;
-                }
-
-                if (!TryToSetParamsProperties(benchmarkTypeInstance, errors))
-                {
-                    continue;
-                }
-
-                if (!TryToCallGlobalSetup(benchmarkTypeInstance, errors))
-                {
-                    continue;
-                }
-
-                ExecuteBenchmarks(benchmarkTypeInstance, typeGroup, errors);
-
-                TryToCallGlobalCleanup(benchmarkTypeInstance, errors);
-            }
-
-            return errors;
-        }
-
-        private bool TryCreateBenchmarkTypeInstance(Type type, List<ValidationError> errors, out object instance)
-        {
-            try
-            {
-                instance = Activator.CreateInstance(type);
-
-                return true;
-            }
-            catch (Exception ex)
-            {
-                errors.Add(new ValidationError(
-                    TreatsWarningsAsErrors,
-                    $"Unable to create instance of {type.Name}, exception was: {GetDisplayExceptionMessage(ex)}"));
-
-                instance = null;
-                return false;
-            }
-        }
-
-        private bool TryToCallGlobalSetup(object benchmarkTypeInstance, List<ValidationError> errors)
-        {
-            return TryToCallGlobalMethod<GlobalSetupAttribute>(benchmarkTypeInstance, errors);
-        }
-
-        private void TryToCallGlobalCleanup(object benchmarkTypeInstance, List<ValidationError> errors)
-        {
-            TryToCallGlobalMethod<GlobalCleanupAttribute>(benchmarkTypeInstance, errors);
-        }
-
-        private bool TryToCallGlobalMethod<T>(object benchmarkTypeInstance, List<ValidationError> errors)
-        {
-            var methods = benchmarkTypeInstance
-                .GetType()
-                .GetAllMethods()
-                .Where(methodInfo => methodInfo.GetCustomAttributes(false).OfType<T>().Any())
-                .ToArray();
-
-            if (!methods.Any())
-            {
-                return true;
-            }
-
-            if (methods.Count(methodInfo => !methodInfo.IsVirtual) > 1)
-            {
-                errors.Add(new ValidationError(
-                    TreatsWarningsAsErrors,
-                    $"Only single [{GetAttributeName(typeof(T))}] method is allowed per type, type {benchmarkTypeInstance.GetType().Name} has few"));
-
-                return false;
-            }
-
-            try
-            {
-                var result = methods.First().Invoke(benchmarkTypeInstance, null);
-
-                TryToGetTaskResult(result);
-            }
-            catch (Exception ex)
-            {
-                errors.Add(new ValidationError(
-                    TreatsWarningsAsErrors,
-                    $"Failed to execute [{GetAttributeName(typeof(T))}] for {benchmarkTypeInstance.GetType().Name}, exception was {GetDisplayExceptionMessage(ex)}"));
-
-                return false;
-            }
+            instance = Activator.CreateInstance(type)!;
 
             return true;
         }
-
-        private string GetAttributeName(Type type) => type.Name.Replace("Attribute", string.Empty);
-
-        private void TryToGetTaskResult(object result)
+        catch (Exception ex) when (!ExceptionHelper.IsProperCancellation(ex, cancellationToken))
         {
-            if (result == null)
-            {
-                return;
-            }
+            errors.Add(new ValidationError(
+                TreatsWarningsAsErrors,
+                $"Unable to create instance of {type.Name}, exception was: {GetDisplayExceptionMessage(ex)}"));
 
-            var returnType = result.GetType();
-            if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(ValueTask<>))
-            {
-                var asTaskMethod = result.GetType().GetMethod("AsTask");
-                result = asTaskMethod.Invoke(result, null);
-            }
-
-            if (result is Task task)
-            {
-                task.GetAwaiter().GetResult();
-            }
-            else if (result is ValueTask valueTask)
-            {
-                valueTask.GetAwaiter().GetResult();
-            }
+            instance = null;
+            return false;
         }
+    }
 
-        private bool TryToSetParamsFields(object benchmarkTypeInstance, List<ValidationError> errors)
+    protected async ValueTask<bool> TryToCallSetupOrCleanup<T>(BenchmarkCase benchmark, object benchmarkTypeInstance, MethodInfo? method, List<ValidationError> errors, CancellationToken cancellationToken)
+    {
+        if (method is null)
         {
-            var paramFields = benchmarkTypeInstance
-                .GetType()
-                .GetAllFields()
-                .Where(fieldInfo => fieldInfo.GetCustomAttributes(false).OfType<ParamsAttribute>().Any())
-                .ToArray();
-
-            if (!paramFields.Any())
-            {
-                return true;
-            }
-
-            foreach (var paramField in paramFields)
-            {
-                if (!paramField.IsPublic)
-                {
-                    errors.Add(new ValidationError(
-                        TreatsWarningsAsErrors,
-                        $"Fields marked with [Params] must be public, {paramField.Name} of {benchmarkTypeInstance.GetType().Name} is not"));
-
-                    return false;
-                }
-
-                var values = paramField.GetCustomAttributes(false).OfType<ParamsAttribute>().Single().Values;
-                if (!values.Any())
-                {
-                    errors.Add(new ValidationError(
-                        TreatsWarningsAsErrors,
-                        $"Fields marked with [Params] must have some values defined, {paramField.Name} of {benchmarkTypeInstance.GetType().Name} has none"));
-
-                    return false;
-                }
-
-                try
-                {
-                    paramField.SetValue(benchmarkTypeInstance, values.First());
-                }
-                catch (Exception ex)
-                {
-                    errors.Add(new ValidationError(
-                        TreatsWarningsAsErrors,
-                        $"Failed to set {paramField.Name} of {benchmarkTypeInstance.GetType().Name} to {values.First()}, exception was: {GetDisplayExceptionMessage(ex)}"));
-
-                    return false;
-                }
-            }
-
             return true;
         }
 
-        private bool TryToSetParamsProperties(object benchmarkTypeInstance, List<ValidationError> errors)
+        try
         {
-            var paramProperties = benchmarkTypeInstance
-                .GetType()
-                .GetAllProperties()
-                .Where(propertyInfo => propertyInfo.GetCustomAttributes(false).OfType<ParamsAttribute>().Any())
-                .ToArray();
-
-            if (!paramProperties.Any())
+            var result = method.Invoke(benchmarkTypeInstance, null);
+            if (method.ReturnType.IsAwaitable(out var awaitableInfo))
             {
-                return true;
+                if (result is null)
+                {
+                    errors.Add(new ValidationError(TreatsWarningsAsErrors, $"[{GetAttributeName(typeof(T))}] for '{benchmark.DisplayInfo}' returned null", benchmark));
+                    return false;
+                }
+                await DynamicAwaitHelper.AwaitResult(result, awaitableInfo).ConfigureAwait(false);
             }
+        }
+        catch (Exception ex) when (!ExceptionHelper.IsProperCancellation(ex, cancellationToken))
+        {
+            errors.Add(new ValidationError(TreatsWarningsAsErrors,
+                $"Failed to execute [{GetAttributeName(typeof(T))}] for '{benchmark.DisplayInfo}', exception was {GetDisplayExceptionMessage(ex)}", benchmark));
 
-            foreach (var paramProperty in paramProperties)
-            {
-                var setter = paramProperty.SetMethod;
-                if (setter == null || !setter.IsPublic)
-                {
-                    errors.Add(new ValidationError(
-                        TreatsWarningsAsErrors,
-                        $"Properties marked with [Params] must have public setter, {paramProperty.Name} of {benchmarkTypeInstance.GetType().Name} has not"));
+            return false;
+        }
 
-                    return false;
-                }
+        return true;
+    }
 
-                var values = paramProperty.GetCustomAttributes(false).OfType<ParamsAttribute>().Single().Values;
-                if (!values.Any())
-                {
-                    errors.Add(new ValidationError(
-                        TreatsWarningsAsErrors,
-                        $"Properties marked with [Params] must have some values defined, {paramProperty.Name} of {benchmarkTypeInstance.GetType().Name} has not"));
+    private string GetAttributeName(Type type) => type.Name.Replace("Attribute", string.Empty);
 
-                    return false;
-                }
-
-                try
-                {
-                    setter.Invoke(benchmarkTypeInstance, new[] { values.First() });
-                }
-                catch (Exception ex)
-                {
-                    errors.Add(new ValidationError(
-                        TreatsWarningsAsErrors,
-                        $"Failed to set {paramProperty.Name} of {benchmarkTypeInstance.GetType().Name} to {values.First()}, exception was: {GetDisplayExceptionMessage(ex)}"));
-
-                    return false;
-                }
-            }
-
+    protected bool TryFillParamsAndGetArgs(BenchmarkCase benchmark, object benchmarkTypeInstance, List<ValidationError> errors, out object?[]? args, CancellationToken cancellationToken)
+    {
+        if (!benchmark.HasParameters)
+        {
+            args = null;
             return true;
         }
 
-        protected static string GetDisplayExceptionMessage(Exception ex)
+        List<object?> argsList = [];
+        foreach (var param in benchmark.Parameters.Items)
         {
-            if (ex is TargetInvocationException targetInvocationException)
-                ex = targetInvocationException.InnerException;
-
-            return ex?.Message ?? "Unknown error";
+            if (!param.IsArgument)
+                continue;
+            if (param.Definition.ParameterType.WithoutRefModifier().IsByRefLike())
+            {
+                errors.Add(new ValidationError(false, $"Benchmark '{benchmark.DisplayInfo}' contains a by-ref-like parameter, skipping validation.", benchmark));
+                args = null;
+                return false;
+            }
+            argsList.Add(param.Value);
         }
+        try
+        {
+            Toolchains.InProcess.NoEmit.InProcessNoEmitRunner.FillMembers(benchmarkTypeInstance, benchmark, cancellationToken);
+        }
+        catch (Exception ex) when (!ExceptionHelper.IsProperCancellation(ex, cancellationToken))
+        {
+            errors.Add(new ValidationError(TreatsWarningsAsErrors, $"Failed to set parameters for {benchmark.Descriptor.Type.Name}, exception was: {GetDisplayExceptionMessage(ex)}", benchmark));
+            args = null;
+            return false;
+        }
+        args = argsList.Count > 0 ? [.. argsList] : null;
+        return true;
+    }
 
-        protected abstract void ExecuteBenchmarks(object benchmarkTypeInstance, IEnumerable<BenchmarkCase> benchmarks, List<ValidationError> errors);
+    protected static string GetDisplayExceptionMessage(Exception ex)
+    {
+        if (ex is TargetInvocationException targetInvocationException)
+            ex = targetInvocationException.InnerException!;
+
+        return ex?.Message ?? "Unknown error";
     }
 }

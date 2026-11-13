@@ -1,5 +1,3 @@
-﻿using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
 
@@ -7,7 +5,7 @@ namespace BenchmarkDotNet.Samples
 {
     public class IntroDeferredExecution
     {
-        private readonly int[] numbers = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+        private readonly int[] numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
         private readonly Consumer consumer = new Consumer();
 

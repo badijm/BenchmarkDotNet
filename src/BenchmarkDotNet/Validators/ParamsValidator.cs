@@ -1,42 +1,46 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Code;
 using BenchmarkDotNet.Extensions;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Validators
 {
     public class ParamsValidator : IValidator
     {
-        public static readonly ParamsValidator FailOnError = new ();
+        public static readonly ParamsValidator FailOnError = new();
 
         public bool TreatsWarningsAsErrors => true;
 
-        public IEnumerable<ValidationError> Validate(ValidationParameters input) => input.Benchmarks
+        public IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters input) => input.Benchmarks
             .Select(benchmark => benchmark.Descriptor.Type)
             .Distinct()
-            .SelectMany(Validate);
+            .SelectMany(ValidateAsync)
+            .ToAsyncEnumerable();
 
-        private IEnumerable<ValidationError> Validate(Type type)
+        private static bool IsStatic(MemberInfo member) => member switch
         {
-            const BindingFlags reflectionFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance |
-                                                 BindingFlags.FlattenHierarchy;
-            foreach (var memberInfo in type.GetMembers(reflectionFlags))
+            FieldInfo field => field.IsStatic,
+            PropertyInfo property => (property.GetMethod ?? property.SetMethod)!.IsStatic,
+            _ => false
+        };
+
+        private IEnumerable<ValidationError> ValidateAsync(Type type)
+        {
+            foreach (var memberInfo in type.GetMembers(ReflectionExtensions.ParameterMemberFlags))
             {
-                var attributes = new Attribute[]
+                var attributes = new Attribute?[]
                     {
                         memberInfo.ResolveAttribute<ParamsAttribute>(),
                         memberInfo.ResolveAttribute<ParamsAllValuesAttribute>(),
                         memberInfo.ResolveAttribute<ParamsSourceAttribute>()
                     }
-                    .Where(attribute => attribute != null)
+                    .WhereNotNull()
                     .ToList();
                 if (attributes.IsEmpty())
                     continue;
 
                 string name = $"{type.Name}.{memberInfo.Name}";
-                string? attributeString = string.Join(", ", attributes.Select(attribute => $"[{attribute.GetType().Name.Replace(nameof(Attribute), "")}]"));
+                string attributeString = string.Join(", ", attributes.Select(attribute => $"[{attribute.GetType().Name.Replace(nameof(Attribute), "")}]"));
 
                 if (attributes.Count > 1)
                     yield return new ValidationError(TreatsWarningsAsErrors,
@@ -58,10 +62,7 @@ namespace BenchmarkDotNet.Validators
 
                 if (memberInfo is PropertyInfo propertyInfo)
                 {
-                    if (propertyInfo.IsInitOnly())
-                        yield return new ValidationError(TreatsWarningsAsErrors,
-                            $"Unable to use {name} with {attributeString} because it's init-only. Please, provide a public setter.");
-
+                    // An init-only setter is fine: the runnable assigns parameters through an object initializer.
                     if (propertyInfo.SetMethod == null)
                         yield return new ValidationError(TreatsWarningsAsErrors,
                             $"Unable to use {name} with {attributeString} because it has no setter. Please, provide a public setter.");

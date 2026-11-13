@@ -1,5 +1,4 @@
-﻿using BenchmarkDotNet.Mathematics;
-using Xunit;
+using BenchmarkDotNet.Mathematics;
 
 namespace BenchmarkDotNet.Tests.Mathematics
 {
@@ -8,19 +7,19 @@ namespace BenchmarkDotNet.Tests.Mathematics
         [Fact]
         public void ArabicTest()
         {
-            Check(NumeralSystem.Arabic, new[] { "1", "2", "3", "4", "5" });
+            Check(NumeralSystem.Arabic, ["1", "2", "3", "4", "5"]);
         }
 
         [Fact]
         public void StarsTest()
         {
-            Check(NumeralSystem.Stars, new[] { "*", "**", "***", "****", "*****" });
+            Check(NumeralSystem.Stars, ["*", "**", "***", "****", "*****"]);
         }
 
         [Fact]
         public void RomanTest()
         {
-            Check(NumeralSystem.Roman, new[] { "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X" });
+            Check(NumeralSystem.Roman, ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]);
         }
 
         private static void Check(NumeralSystem system, string[] expected)

@@ -1,6 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Diagnostics.Windows.Tracing;
@@ -11,9 +8,7 @@ using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
 using JetBrains.Annotations;
-using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers;
-using Microsoft.Diagnostics.Tracing.Session;
 
 namespace BenchmarkDotNet.Diagnostics.Windows
 {
@@ -28,11 +23,11 @@ namespace BenchmarkDotNet.Diagnostics.Windows
         [PublicAPI] // parameterless ctor required by DiagnosersLoader to support creating this profiler via console line args
         public NativeMemoryProfiler() => etwProfiler = new EtwProfiler(CreateDefaultConfig());
 
-        public IEnumerable<string> Ids => new[] { nameof(NativeMemoryProfiler) };
+        public IEnumerable<string> Ids => [nameof(NativeMemoryProfiler)];
 
-        public IEnumerable<IExporter> Exporters => Array.Empty<IExporter>();
+        public IEnumerable<IExporter> Exporters => [];
 
-        public IEnumerable<IAnalyser> Analysers => Array.Empty<IAnalyser>();
+        public IEnumerable<IAnalyser> Analysers => [];
 
         public void DisplayResults(ILogger resultLogger)
         {
@@ -46,19 +41,20 @@ namespace BenchmarkDotNet.Diagnostics.Windows
                 resultLogger.Write(line.Kind, line.Text);
         }
 
-        public void Handle(HostSignal signal, DiagnoserActionParameters parameters) => etwProfiler.Handle(signal, parameters);
+        public ValueTask HandleAsync(HostSignal signal, DiagnoserActionParameters parameters, CancellationToken cancellationToken)
+            => etwProfiler.HandleAsync(signal, parameters, cancellationToken);
 
         public RunMode GetRunMode(BenchmarkCase benchmarkCase) => etwProfiler.GetRunMode(benchmarkCase);
 
         public IEnumerable<Metric> ProcessResults(DiagnoserResults results)
         {
             if (!etwProfiler.BenchmarkToEtlFile.TryGetValue(results.BenchmarkCase, out var traceFilePath))
-                return Enumerable.Empty<Metric>();
+                return [];
 
             return new NativeMemoryLogParser(traceFilePath, results.BenchmarkCase, logger, results.BuildResult.ArtifactsPaths.ProgramName).Parse();
         }
 
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters) => etwProfiler.Validate(validationParameters);
+        public IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters) => etwProfiler.ValidateAsync(validationParameters);
 
         private static EtwProfilerConfig CreateDefaultConfig()
         {

@@ -1,14 +1,11 @@
-﻿using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Text;
 using BenchmarkDotNet.Code;
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Parameters;
 using BenchmarkDotNet.Running;
 using JetBrains.Annotations;
+using System.Collections;
+using System.Reflection;
+using System.Text;
 
 namespace BenchmarkDotNet.Exporters
 {
@@ -54,7 +51,7 @@ namespace BenchmarkDotNet.Exporters
             // we can't just use type.FullName because we need sth different for generics (it reports SimpleGeneric`1[[System.Int32, mscorlib, Version=4.0.0.0)
             var name = new StringBuilder();
 
-            if (!string.IsNullOrEmpty(type.Namespace))
+            if (type.Namespace.IsNotBlank())
                 name.Append(type.Namespace).Append('.');
 
             name.Append(GetNestedTypes(type));
@@ -69,13 +66,13 @@ namespace BenchmarkDotNet.Exporters
         private static string GetNestedTypes(Type type)
         {
             string nestedTypes = "";
-            Type child = type, parent = type.DeclaringType;
+            Type child = type, parent = type.DeclaringType!;
             while (child.IsNested && parent != null)
             {
                 nestedTypes = parent.Name + "+" + nestedTypes;
 
                 child = parent;
-                parent = parent.DeclaringType;
+                parent = parent.DeclaringType!;
             }
 
             return nestedTypes;
@@ -114,7 +111,7 @@ namespace BenchmarkDotNet.Exporters
                     parametersBuilder.Append(", ");
 
                 parametersBuilder.Append(methodArguments[i].Name).Append(':').Append(' ');
-                parametersBuilder.Append(GetArgument(benchmarkParameters.GetArgument(methodArguments[i].Name).Value, methodArguments[i].ParameterType));
+                parametersBuilder.Append(GetArgument(benchmarkParameters.GetArgument(methodArguments[i].Name!).Value, methodArguments[i].ParameterType));
             }
 
             for (int i = 0; i < benchmarkParams.Length; i++)
@@ -131,13 +128,12 @@ namespace BenchmarkDotNet.Exporters
             return parametersBuilder.Append(')').ToString();
         }
 
-        private static string GetArgument(object argumentValue, Type argumentType)
+        private static string GetArgument(object? argumentValue, Type? argumentType)
         {
-            switch (argumentValue) {
+            switch (argumentValue)
+            {
                 case null:
                     return "null";
-                case IParam iparam:
-                    return GetArgument(iparam.Value, argumentType);
                 case object[] array when array.Length == 1:
                     return GetArgument(array[0], argumentType);
                 case string text:
@@ -151,9 +147,9 @@ namespace BenchmarkDotNet.Exporters
             }
 
             if (argumentType != null && argumentType.IsArray)
-                return GetArray((IEnumerable)argumentValue);
+                return GetArray((IEnumerable) argumentValue);
 
-            return argumentValue.ToString();
+            return argumentValue.ToString()!;
         }
 
         // it's not generic so I can't simply use .Skip and all other LINQ goodness
@@ -185,13 +181,13 @@ namespace BenchmarkDotNet.Exporters
 
         private static string GetTypeArgumentName(Type type)
         {
-            if (Aliases.TryGetValue(type, out string alias))
+            if (Aliases.TryGetValue(type, out var alias))
                 return alias;
 
             if (type.IsNullable())
-                return $"{GetTypeArgumentName(Nullable.GetUnderlyingType(type))}?";
+                return $"{GetTypeArgumentName(Nullable.GetUnderlyingType(type)!)}?";
 
-            if (!string.IsNullOrEmpty(type.Namespace))
+            if (type.Namespace.IsNotBlank())
                 return $"{type.Namespace}.{GetTypeName(type)}";
 
             return GetTypeName(type);

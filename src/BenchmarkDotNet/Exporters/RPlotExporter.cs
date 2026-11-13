@@ -1,13 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Exporters.Csv;
+using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Loggers;
-using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Properties;
 using BenchmarkDotNet.Reports;
+using BenchmarkDotNet.Toolchains.Parameters;
+using System.Diagnostics;
 
 namespace BenchmarkDotNet.Exporters
 {
@@ -17,7 +16,7 @@ namespace BenchmarkDotNet.Exporters
         public string Name => nameof(RPlotExporter);
 
         private const string ImageExtension = ".png";
-        private static readonly object BuildScriptLock = new object();
+        private static readonly SemaphoreSlim BuildScriptLock = new(1, 1);
 
         public IEnumerable<IExporter> Dependencies
         {
@@ -25,25 +24,28 @@ namespace BenchmarkDotNet.Exporters
             get { yield return CsvMeasurementsExporter.Default; }
         }
 
-        public IEnumerable<string> ExportToFiles(Summary summary, ILogger consoleLogger)
+        public async ValueTask ExportAsync(Summary summary, ILogger logger, CancellationToken cancellationToken)
         {
             const string scriptFileName = "BuildPlots.R";
             const string logFileName = "BuildPlots.log";
-            yield return Path.Combine(summary.ResultsDirectoryPath, scriptFileName);
 
-            string csvFullPath = CsvMeasurementsExporter.Default.GetArtifactFullName(summary);
-            string scriptFullPath = Path.Combine(summary.ResultsDirectoryPath, scriptFileName);
-            string logFullPath = Path.Combine(summary.ResultsDirectoryPath, logFileName);
-            string script = ResourceHelper.
-                LoadTemplate(scriptFileName).
-                Replace("$BenchmarkDotNetVersion$", BenchmarkDotNetInfo.FullTitle).
-                Replace("$CsvSeparator$", CsvMeasurementsExporter.Default.Separator);
-            lock (BuildScriptLock)
-                File.WriteAllText(scriptFullPath, script);
+            string csvFullPath = Path.GetFullPath(CsvMeasurementsExporter.Default.GetArtifactFullName(summary));
+            string scriptFullPath = Path.GetFullPath(Path.Combine(summary.ResultsDirectoryPath, scriptFileName));
+            string logFullPath = Path.GetFullPath(Path.Combine(summary.ResultsDirectoryPath, logFileName));
 
-            if (!TryFindRScript(consoleLogger, out string rscriptPath))
+            logger.WriteLineInfo($"  {scriptFullPath.GetBaseName(Directory.GetCurrentDirectory())}");
+
+            string script = (await ResourceHelper.LoadTemplateAsync(scriptFileName, cancellationToken).ConfigureAwait(false))
+                .Replace("$BenchmarkDotNetVersion$", BenchmarkDotNetInfo.Instance.BrandTitle)
+                .Replace("$CsvSeparator$", CsvMeasurementsExporter.Default.Separator);
+            using (await BuildScriptLock.EnterScopeAsync(cancellationToken).ConfigureAwait(false))
             {
-                yield break;
+                await File.WriteAllTextAsync(scriptFullPath, script, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (!TryFindRScript(logger, out var rscriptPath))
+            {
+                return;
             }
 
             var start = new ProcessStartInfo
@@ -53,67 +55,97 @@ namespace BenchmarkDotNet.Exporters
                 RedirectStandardError = true,
                 CreateNoWindow = true,
                 FileName = rscriptPath,
-                WorkingDirectory = summary.ResultsDirectoryPath,
                 Arguments = $"\"{scriptFullPath}\" \"{csvFullPath}\""
             };
-            using (var process = new Process {StartInfo = start})
-            using (AsyncProcessOutputReader reader = new AsyncProcessOutputReader(process))
+            using var process = new Process { StartInfo = start };
+            // When large R scripts are generated then ran, ReadToEnd()
+            // causes the stdout and stderr buffers to become full,
+            // which causes R to hang. To avoid this, use
+            // AsyncProcessOutputReader to stream the log contents
+            // to disk rather than Process.Standard*.ReadToEnd().
+            using AsyncProcessOutputReader reader = new(process, cacheStandardOutput: false, channelStandardOutput: true);
+            using var fileStream = new FileStream(logFullPath, FileMode.Create, FileAccess.Write, FileShare.Read, 4096, useAsync: true);
+            using var streamWriter = new CancelableStreamWriter(fileStream);
+
+            await using (new ProcessCleanupHelper(process, reader, logger).ConfigureAwait(false))
             {
-                // When large R scripts are generated then ran, ReadToEnd()
-                // causes the stdout and stderr buffers to become full,
-                // which causes R to hang. To avoid this, use
-                // AsyncProcessOutputReader to cache the log contents
-                // then write to disk rather than Process.Standard*.ReadToEnd().
                 process.Start();
+
                 reader.BeginRead();
-                process.WaitForExit();
-                reader.StopRead();
-                File.WriteAllLines(logFullPath, reader.GetOutputLines());
-                File.AppendAllLines(logFullPath, reader.GetErrorLines());
+
+                await foreach (var line in reader.OutputChannel!.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    await streamWriter.WriteLineAsync(line, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (!process.WaitForExit(milliseconds: (int) ExecuteParameters.ProcessExitTimeout.TotalMilliseconds))
+                {
+                    logger.WriteLineInfo("// The R script process did not quit on time, it's going to get force killed now.");
+                }
             }
 
-            yield return Path.Combine(summary.ResultsDirectoryPath, $"*{ImageExtension}");
+            foreach (var line in reader.GetErrorLines())
+            {
+                await streamWriter.WriteLineAsync(line, cancellationToken).ConfigureAwait(false);
+            }
+
+            Debug.Assert(process.HasExited);
+            if (process.ExitCode != 0)
+                throw new ApplicationException($"Process {rscriptPath} has exited with code {process.ExitCode}");
+
+            logger.WriteLineInfo($"  {Path.Combine(summary.ResultsDirectoryPath, $"*{ImageExtension}").GetBaseName(Directory.GetCurrentDirectory())}");
         }
 
-        public void ExportToLog(Summary summary, ILogger logger)
+        private static bool TryFindRScript(ILogger consoleLogger, out string? rscriptPath)
         {
-            throw new NotSupportedException();
-        }
-
-        private static bool TryFindRScript(ILogger consoleLogger, out string rscriptPath)
-        {
-            string rscriptExecutable = RuntimeInformation.IsWindows() ? "Rscript.exe" : "Rscript";
+            string rscriptExecutable = OsDetector.IsWindows() ? "Rscript.exe" : "Rscript";
             rscriptPath = null;
-            string rHome = Environment.GetEnvironmentVariable("R_HOME");
+
+            string? rHome = Environment.GetEnvironmentVariable("R_HOME");
             if (rHome != null)
             {
                 rscriptPath = Path.Combine(rHome, "bin", rscriptExecutable);
                 if (File.Exists(rscriptPath))
-                {
                     return true;
-                }
 
-                consoleLogger.WriteLineError($"RPlotExporter requires R_HOME to point to the parent directory of the existing '{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}{rscriptExecutable} (currently points to {rHome})");
+                consoleLogger.WriteLineError($"{nameof(RPlotExporter)} requires R_HOME to point to the parent directory of the existing '{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}{rscriptExecutable} (currently points to {rHome})");
+                return false;
             }
 
             // No R_HOME, or R_HOME points to a wrong folder, try the path
             rscriptPath = FindInPath(rscriptExecutable);
-            if (rscriptPath == null)
+            if (rscriptPath != null)
+                return true;
+
+            if (OsDetector.IsWindows())
             {
-                consoleLogger.WriteLineError($"RPlotExporter couldn't find {rscriptExecutable} in your PATH and no R_HOME environment variable is defined");
-                return false;
+                string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                string programFilesR = Path.Combine(programFiles, "R");
+                if (Directory.Exists(programFilesR))
+                {
+                    foreach (string rRootDirectory in Directory.EnumerateDirectories(programFilesR))
+                    {
+                        string rscriptPathCandidate = Path.Combine(rRootDirectory, "bin", rscriptExecutable);
+                        if (File.Exists(rscriptPathCandidate))
+                        {
+                            rscriptPath = rscriptPathCandidate;
+                            return true;
+                        }
+                    }
+                }
             }
 
-            return true;
+            consoleLogger.WriteLineError($"{nameof(RPlotExporter)} couldn't find {rscriptExecutable} in your PATH and no R_HOME environment variable is defined");
+            return false;
         }
 
-        private static string FindInPath(string fileName)
+        private static string? FindInPath(string fileName)
         {
-            string path = Environment.GetEnvironmentVariable("PATH");
+            string? path = Environment.GetEnvironmentVariable("PATH");
             if (path == null)
                 return null;
 
-            var dirs = path.Split(Path.PathSeparator);
+            string[] dirs = path.Split(Path.PathSeparator);
             foreach (string dir in dirs)
             {
                 string trimmedDir = dir.Trim('\'', '"');

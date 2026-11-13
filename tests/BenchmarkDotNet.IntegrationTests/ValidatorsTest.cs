@@ -1,14 +1,12 @@
-﻿using System.Collections.Generic;
-using BenchmarkDotNet.Validators;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Exporters.Csv;
-using BenchmarkDotNet.Loggers;
-using Xunit;
-using Xunit.Abstractions;
 using BenchmarkDotNet.Exporters.Json;
+using BenchmarkDotNet.Exporters.OpenMetrics;
 using BenchmarkDotNet.Exporters.Xml;
+using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Validators;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -17,19 +15,20 @@ namespace BenchmarkDotNet.IntegrationTests
         public ValidatorsTest(ITestOutputHelper output) : base(output) { }
 
         private readonly IExporter[] AllKnownExportersThatSupportExportToLog =
-            {
+            [
                 MarkdownExporter.Atlassian,
                 MarkdownExporter.Console,
                 MarkdownExporter.Default,
                 MarkdownExporter.GitHub,
                 MarkdownExporter.StackOverflow,
+                OpenMetricsExporter.Default,
                 CsvExporter.Default,
                 CsvMeasurementsExporter.Default,
                 HtmlExporter.Default,
                 PlainExporter.Default,
                 JsonExporter.Default,
                 XmlExporter.Default
-            };
+            ];
 
         [Fact]
         public void BenchmarkRunnerShouldNotFailOnCriticalValidationErrors()
@@ -42,13 +41,13 @@ namespace BenchmarkDotNet.IntegrationTests
         }
 
         [Fact]
-        public void LoggersShouldNotFailOnCriticalValidationErrors()
+        public async Task LoggersShouldNotFailOnCriticalValidationErrors()
         {
             var summary = CanExecute<Nothing>(CreateSimpleConfig().AddValidator(new FailingValidator()), fullValidation: false);
 
             foreach (var exporter in AllKnownExportersThatSupportExportToLog)
             {
-                exporter.ExportToLog(summary, new AccumulationLogger());
+                await exporter.ExportAsync(summary, new AccumulationLogger(), CancellationToken.None);
             }
         }
 
@@ -56,7 +55,7 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             public bool TreatsWarningsAsErrors => true;
 
-            public IEnumerable<ValidationError> Validate(ValidationParameters input)
+            public async IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters input)
             {
                 yield return new ValidationError(true, "It just fails");
             }

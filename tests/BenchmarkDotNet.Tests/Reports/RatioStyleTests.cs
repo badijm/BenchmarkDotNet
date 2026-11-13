@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
@@ -11,12 +7,11 @@ using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Builders;
+using BenchmarkDotNet.Tests.Helpers;
 using BenchmarkDotNet.Toolchains;
 using BenchmarkDotNet.Toolchains.Results;
-using BenchmarkDotNet.Validators;
 using JetBrains.Annotations;
-using Xunit;
-using Xunit.Abstractions;
+using System.Collections.Immutable;
 
 namespace BenchmarkDotNet.Tests.Reports
 {
@@ -47,8 +42,8 @@ namespace BenchmarkDotNet.Tests.Reports
 
         private static readonly IDictionary<string, TestData> Data = new Dictionary<string, TestData>
         {
-            { "Percentage", new TestData(RatioStyle.Percentage, new[] { 100, 15, 115 }, 1, new[] { "baseline", "-85%", "+15%" }) },
-            { "Trend", new TestData(RatioStyle.Trend, new[] { 100, 15, 115 }, 1, new[] { "baseline", "6.83x faster", "1.15x slower" }) }
+            { "Percentage", new TestData(RatioStyle.Percentage, [100, 15, 115], 1, ["baseline", "-85%", "+15%"]) },
+            { "Trend", new TestData(RatioStyle.Trend, [100, 15, 115], 1, ["baseline", "6.84x faster", "1.15x slower"]) }
         };
 
         [UsedImplicitly]
@@ -93,16 +88,16 @@ namespace BenchmarkDotNet.Tests.Reports
                 string.Empty,
                 TimeSpan.FromMinutes(1),
                 TestCultureInfo.Instance,
-                ImmutableArray<ValidationError>.Empty,
-                ImmutableArray<IColumnHidingRule>.Empty);
-            MarkdownExporter.Default.ExportToLog(summary, logger);
+                [],
+                []);
+            ((ExporterBase) MarkdownExporter.Default).ExportToLogAsync(summary, logger, CancellationToken.None).AsTask().GetAwaiter().GetResult();
             output.WriteLine(logger.GetLog());
             return summary;
         }
 
         private static BenchmarkReport CreateReport(BenchmarkCase benchmarkCase, int measurementValue, int noise)
         {
-            var buildResult = BuildResult.Success(GenerateResult.Success(ArtifactsPaths.Empty, Array.Empty<string>()));
+            var buildResult = BuildResult.Success(ArtifactsPaths.Empty);
             var measurements = new List<Measurement>
             {
                 new Measurement(1, IterationMode.Workload, IterationStage.Result, 1, 1, measurementValue),
@@ -111,8 +106,8 @@ namespace BenchmarkDotNet.Tests.Reports
                 new Measurement(1, IterationMode.Workload, IterationStage.Result, 4, 1, measurementValue + 2 * noise),
                 new Measurement(1, IterationMode.Workload, IterationStage.Result, 5, 1, measurementValue - 3 * noise)
             };
-            var executeResult = new ExecuteResult(measurements, default, default, 0);
-            return new BenchmarkReport(true, benchmarkCase, buildResult, buildResult, new List<ExecuteResult> { executeResult }, Array.Empty<Metric>());
+            var executeResult = new ExecuteResult(measurements, default);
+            return new BenchmarkReport(true, benchmarkCase, buildResult, [executeResult], []);
         }
 
         private static IEnumerable<BenchmarkCase> CreateBenchmarks(IConfig config) =>

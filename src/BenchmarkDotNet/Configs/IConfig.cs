@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Globalization;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Diagnosers;
+using BenchmarkDotNet.EventProcessors;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Filters;
 using BenchmarkDotNet.Jobs;
@@ -12,7 +10,7 @@ using BenchmarkDotNet.Order;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
-using JetBrains.Annotations;
+using System.Globalization;
 
 namespace BenchmarkDotNet.Configs
 {
@@ -28,19 +26,28 @@ namespace BenchmarkDotNet.Configs
         IEnumerable<HardwareCounter> GetHardwareCounters();
         IEnumerable<IFilter> GetFilters();
         IEnumerable<BenchmarkLogicalGroupRule> GetLogicalGroupRules();
+        IEnumerable<EventProcessor> GetEventProcessors();
         IEnumerable<IColumnHidingRule> GetColumnHidingRules();
 
         IOrderer? Orderer { get; }
         ICategoryDiscoverer? CategoryDiscoverer { get; }
 
-        SummaryStyle SummaryStyle { get; }
+        SummaryStyle? SummaryStyle { get; }
 
         ConfigUnionRule UnionRule { get; }
 
         /// <summary>
         /// the default value is "./BenchmarkDotNet.Artifacts"
         /// </summary>
-        string ArtifactsPath { get; }
+        string? ArtifactsPath { get; }
+
+        /// <summary>
+        /// the title of the produced summaries and the base name of the result files exported for them;
+        /// when the run reports more than one summary, the name of the benchmarked type is appended to keep
+        /// their files apart. When not specified, the name of the benchmarked type is used
+        /// (or "BenchmarkRun-joined" when <see cref="ConfigOptions.JoinSummary"/> is set)
+        /// </summary>
+        string? Title { get; }
 
         CultureInfo? CultureInfo { get; }
 
@@ -53,6 +60,8 @@ namespace BenchmarkDotNet.Configs
         /// the auto-generated project build timeout
         /// </summary>
         TimeSpan BuildTimeout { get; }
+
+        public WakeLockType WakeLock { get; }
 
         /// <summary>
         /// Collect any errors or warnings when composing the configuration

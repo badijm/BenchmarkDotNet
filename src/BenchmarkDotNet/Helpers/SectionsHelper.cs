@@ -1,8 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text.RegularExpressions;
-using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.Helpers
 {
@@ -11,10 +7,10 @@ namespace BenchmarkDotNet.Helpers
         public static Dictionary<string, string> ParseSection(string? content, char separator)
         {
             var values = new Dictionary<string, string>();
-            var list = content?.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var list = content?.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
             if (list != null)
                 foreach (string line in list)
-                    if (line.IndexOf(separator) != -1)
+                    if (line.Contains(separator))
                     {
                         var lineParts = line.Split(separator);
                         if (lineParts.Length >= 2)
@@ -29,6 +25,15 @@ namespace BenchmarkDotNet.Helpers
             // Therefore, the * quantifier should be used to workaround it.
             return
                 Regex.Split(content ?? "", "(\r*\n){2,}")
+                    .Select(s => ParseSection(s, separator))
+                    .Where(s => s.Count > 0)
+                    .ToList();
+        }
+
+        public static List<Dictionary<string, string>> ParseSectionsForPowershellWmi(string? content, char separator)
+        {
+            return
+                Regex.Split(content ?? "", "(\r*\n)")
                     .Select(s => ParseSection(s, separator))
                     .Where(s => s.Count > 0)
                     .ToList();

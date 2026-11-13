@@ -1,14 +1,12 @@
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Linq;
-using System.Runtime;
+using BenchmarkDotNet.Detectors.Cpu;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Portability;
-using BenchmarkDotNet.Portability.Cpu;
+using BenchmarkDotNet.Properties;
 using BenchmarkDotNet.Validators;
 using JetBrains.Annotations;
+using System.Diagnostics;
+using System.Runtime;
 
 namespace BenchmarkDotNet.Environments
 {
@@ -35,8 +33,8 @@ namespace BenchmarkDotNet.Environments
             Architecture = RuntimeInformation.GetArchitecture();
             RuntimeVersion = RuntimeInformation.GetRuntimeVersion();
             Configuration = RuntimeInformation.GetConfiguration();
-            HasRyuJit = RuntimeInformation.HasRyuJit();
-            JitInfo = RuntimeInformation.GetJitInfo();
+            HasRyuJit = Portability.JitInfo.IsRyuJit;
+            JitInfo = Portability.JitInfo.GetInfo();
             HardwareIntrinsicsShort = HardwareIntrinsics.GetShortInfo();
             IsServerGC = GCSettings.IsServerGC;
             IsConcurrentGC = GCSettings.LatencyMode != GCLatencyMode.Batch;
@@ -51,12 +49,14 @@ namespace BenchmarkDotNet.Environments
         public virtual IEnumerable<string> ToFormattedString()
         {
             yield return "Benchmark Process Environment Information:";
+            yield return $"{BenchmarkDotNetInfo.Instance.BrandTitle}";
             yield return $"{RuntimeInfoPrefix}{GetRuntimeInfo()}";
             yield return $"{GcInfoPrefix}{GetGcConcurrentFlag()} {GetGcServerFlag()}";
             yield return $"{HardwareIntrinsicsPrefix}{HardwareIntrinsics.GetFullInfo(RuntimeInformation.GetCurrentPlatform())} {HardwareIntrinsics.GetVectorSize()}";
         }
 
-        [PublicAPI] protected string GetConfigurationFlag() => Configuration == RuntimeInformation.Unknown || Configuration == RuntimeInformation.ReleaseConfigurationName
+        [PublicAPI]
+        protected string GetConfigurationFlag() => Configuration == RuntimeInformation.Unknown || Configuration == RuntimeInformation.ReleaseConfigurationName
             ? ""
             : Configuration;
 
@@ -72,7 +72,7 @@ namespace BenchmarkDotNet.Environments
 
         public static IEnumerable<ValidationError> Validate(Job job)
         {
-            if (job.Environment.Jit == Jit.RyuJit && !RuntimeInformation.HasRyuJit())
+            if (job.Environment.Jit == Jit.RyuJit && !Portability.JitInfo.IsRyuJit)
                 yield return new ValidationError(true, "RyuJIT is requested but it is not available in current environment");
             var currentRuntime = RuntimeInformation.GetCurrentRuntime();
             if (job.Environment.Jit == Jit.LegacyJit && !(currentRuntime is ClrRuntime))

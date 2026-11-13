@@ -1,6 +1,4 @@
-﻿using System;
 using BenchmarkDotNet.Reports;
-using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.Analysers
 {
@@ -39,7 +37,7 @@ namespace BenchmarkDotNet.Analysers
         public static Conclusion CreateError(string analyserId, string message, BenchmarkReport? report = null, bool mergeable = true)
             => new Conclusion(analyserId, ConclusionKind.Error, message, report, mergeable);
 
-        public bool Equals(Conclusion other)
+        public bool Equals(Conclusion? other)
         {
             if (ReferenceEquals(null, other))
                 return false;
@@ -50,7 +48,7 @@ namespace BenchmarkDotNet.Analysers
             return string.Equals(AnalyserId, other.AnalyserId) && Kind == other.Kind && string.Equals(Message, other.Message);
         }
 
-        public override bool Equals(object obj)
+        public override bool Equals(object? obj)
         {
             if (ReferenceEquals(null, obj))
                 return false;

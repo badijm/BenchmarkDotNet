@@ -1,14 +1,10 @@
-﻿using System;
-using System.Linq;
-using System.Threading;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Tests.Loggers;
-using Xunit;
-using Xunit.Abstractions;
+using BenchmarkDotNet.Tests.XUnit;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -16,12 +12,9 @@ namespace BenchmarkDotNet.IntegrationTests
     {
         public RunStrategyTests(ITestOutputHelper output) : base(output) { }
 
-        [Fact]
+        [FactEnvSpecific(EnvRequirement.NonGitHubDraftPR)]
         public void RunStrategiesAreSupported()
         {
-            if (ContinuousIntegration.IsAppVeyorOnWindows())
-                return; // timeouts
-
             var config = ManualConfig.CreateEmpty()
                 .AddColumnProvider(DefaultColumnProviders.Instance)
                 .AddLogger(new OutputLogger(Output))
@@ -31,7 +24,7 @@ namespace BenchmarkDotNet.IntegrationTests
 
             var results = CanExecute<ModeBenchmarks>(config);
 
-            Assert.Equal(6, results.BenchmarksCases.Count());
+            Assert.Equal(6, results.BenchmarksCases.Length);
 
             Assert.Equal(1, results.BenchmarksCases.Count(b => b.Job.Run.RunStrategy == RunStrategy.ColdStart && b.Descriptor.WorkloadMethod.Name == "BenchmarkWithVoid"));
             Assert.Equal(1, results.BenchmarksCases.Count(b => b.Job.Run.RunStrategy == RunStrategy.ColdStart && b.Descriptor.WorkloadMethod.Name == "BenchmarkWithReturnValue"));

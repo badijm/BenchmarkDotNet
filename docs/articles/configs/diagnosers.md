@@ -35,10 +35,10 @@ The current Diagnosers are:
   Please see Adam Sitnik's [blog post](https://adamsitnik.com/ConcurrencyVisualizer-Profiler/) for all the details.
 - Native Memory Profiler (`NativeMemoryProfiler`)
   It uses `EtwProfiler` to profile the code using ETW and adds the extra columns `Allocated native memory` and `Native memory leak`.
-  Please see Wojciech Nagórski's [blog post](https://wojciechnagorski.com/2019/08/analyzing-native-memory-allocation-with-benchmarkdotnet/) for all the details.
+  Please see Wojciech Nagórski's [blog post](https://wojciechnagorski.github.io/2019/08/analyzing-native-memory-allocation-with-benchmarkdotnet/) for all the details.
 - Event Pipe Profiler (`EventPipeProfiler`).
   It is a cross-platform profiler that allows profile .NET code on every platform - Windows, Linux, macOS.
-  Please see Wojciech Nagórski's [blog post](https://wojciechnagorski.com/2020/04/cross-platform-profiling-.net-code-with-benchmarkdotnet/) for all the details.
+  Please see Wojciech Nagórski's [blog post](https://wojciechnagorski.github.io/2020/04/cross-platform-profiling-.net-code-with-benchmarkdotnet/) for all the details.
 - Threading Diagnoser (`ThreadingDiagnoser`) - .NET Core 3.0+ diagnoser that reports some Threading statistics.
 - Exception Diagnoser (`ExceptionDiagnoser`) - a diagnoser that reports the frequency of exceptions thrown during the operation.
 
@@ -59,11 +59,11 @@ private class Config : ManualConfig
 {
     public Config()
     {
-        Add(MemoryDiagnoser.Default);
-        Add(new InliningDiagnoser());
-        Add(new EtwProfiler());
-        Add(ThreadingDiagnoser.Default);
-        Add(ExceptionDiagnoser.Default);
+        AddDiagnoser(MemoryDiagnoser.Default);
+        AddDiagnoser(new InliningDiagnoser());
+        AddDiagnoser(new EtwProfiler());
+        AddDiagnoser(ThreadingDiagnoser.Default);
+        AddDiagnoser(ExceptionDiagnoser.Default);
     }
 }
 ```
@@ -86,7 +86,6 @@ In BenchmarkDotNet, 1kB = 1024B, 1MB = 1024kB, and so on. The column Gen X means
 
 * In order to not affect main results we perform a separate run if any diagnoser is used. That's why it might take more time to execute benchmarks.
 * MemoryDiagnoser:
-	* Mono currently [does not](https://stackoverflow.com/questions/40234948/how-to-get-the-number-of-allocated-bytes-in-mono) expose any api to get the number of allocated bytes. That's why our Mono users will get `?` in Allocated column.
 	* In order to get the number of allocated bytes in cross platform way we are using `GC.GetAllocatedBytesForCurrentThread` which recently got [exposed](https://github.com/dotnet/corefx/pull/12489) for netcoreapp1.1. That's why BenchmarkDotNet does not support netcoreapp1.0 from version 0.10.1.
 	* MemoryDiagnoser is `99.5%` accurate about allocated memory when using default settings or Job.ShortRun (or any longer job than it).
 * Threading Diagnoser:

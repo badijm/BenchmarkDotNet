@@ -1,6 +1,4 @@
-﻿using BenchmarkDotNet.IntegrationTests.ConfigPerAssembly;
-using Xunit;
-using Xunit.Abstractions;
+using BenchmarkDotNet.IntegrationTests.ConfigPerAssembly;
 
 namespace BenchmarkDotNet.IntegrationTests
 {

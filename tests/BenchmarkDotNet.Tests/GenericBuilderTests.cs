@@ -1,7 +1,5 @@
-﻿using System;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Helpers;
-using Xunit;
 
 namespace BenchmarkDotNet.Tests
 {
@@ -10,7 +8,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void TestBuildGenericWithOneArgument()
         {
-            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks(new[] {typeof(OneArgGenericBenchmark<>)});
+            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks([typeof(OneArgGenericBenchmark<>)]);
 
             Assert.Equal(2, types.Length);
             Assert.Single(types, typeof(OneArgGenericBenchmark<int>));
@@ -27,7 +25,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void TestBuildGenericWithTwoArguments()
         {
-            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks(new[] {typeof(TwoArgGenericBenchmark<,>)});
+            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks([typeof(TwoArgGenericBenchmark<,>)]);
 
             Assert.Equal(2, types.Length);
             Assert.Single(types, typeof(TwoArgGenericBenchmark<int, char>));
@@ -46,14 +44,14 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void TestBuildGenericWithThreeArguments()
         {
-            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks(new[] {typeof(ThreeArgGenericBenchmark<,,>)});
+            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks([typeof(ThreeArgGenericBenchmark<,,>)]);
 
             Assert.Equal(2, types.Length);
             Assert.Single(types, typeof(ThreeArgGenericBenchmark<int, char, string>));
             Assert.Single(types, typeof(ThreeArgGenericBenchmark<char, string, byte>));
         }
 
-        [GenericTypeArguments(typeof(int), typeof(char),  typeof(string))]
+        [GenericTypeArguments(typeof(int), typeof(char), typeof(string))]
         [GenericTypeArguments(typeof(char), typeof(string), typeof(byte))]
         public class ThreeArgGenericBenchmark<T1, T2, T3>
         {
@@ -67,7 +65,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void TestBuildGenericWithWrongAttributes()
         {
-            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks(new[] {typeof(GenericBenchmarkWithWrongAttribute<,>)});
+            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks([typeof(GenericBenchmarkWithWrongAttribute<,>)]);
 
             Assert.Equal(2, types.Length);
             Assert.Single(types, typeof(GenericBenchmarkWithWrongAttribute<int, char>));
@@ -76,7 +74,9 @@ namespace BenchmarkDotNet.Tests
 
         [GenericTypeArguments(typeof(int), typeof(char))]
         [GenericTypeArguments(typeof(char), typeof(string))]
+#pragma warning disable BDN1102
         [GenericTypeArguments(typeof(char))]
+#pragma warning restore BDN1102
         public class GenericBenchmarkWithWrongAttribute<T1, T2>
         {
             [Benchmark] public T1 CreateT1() => Activator.CreateInstance<T1>();
@@ -87,7 +87,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void TestBuildGenericWithConstraints()
         {
-            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks(new[] {typeof(GenericBenchmarkWithConstraints<,>)});
+            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks([typeof(GenericBenchmarkWithConstraints<,>)]);
 
             Assert.Equal(2, types.Length);
             Assert.Single(types, typeof(GenericBenchmarkWithConstraints<int, char>));
@@ -107,7 +107,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void TestBuildGenericWithConstraintsWrongArgs()
         {
-            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks(new[] {typeof(GenericBenchmarkWithConstraintsWrongArgs<,>)});
+            var types = GenericBenchmarksBuilder.GetRunnableBenchmarks([typeof(GenericBenchmarkWithConstraintsWrongArgs<,>)]);
 
             Assert.Single(types);
             Assert.Single(types, typeof(GenericBenchmarkWithConstraintsWrongArgs<int, char>));

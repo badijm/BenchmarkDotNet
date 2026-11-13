@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.Diagnosers
@@ -27,10 +26,10 @@ namespace BenchmarkDotNet.Diagnosers
         {
             checked // if we ever overflow ulong we need to throw!
             {
-                Count += (ulong)Interval;
+                Count += (ulong) Interval;
 
                 PerInstructionPointer.TryGetValue(instructionPointer, out ulong currentValue);
-                PerInstructionPointer[instructionPointer] = currentValue + (ulong)Interval;
+                PerInstructionPointer[instructionPointer] = currentValue + (ulong) Interval;
             }
         }
     }

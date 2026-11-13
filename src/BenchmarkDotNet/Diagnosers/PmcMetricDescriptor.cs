@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Reports;
 
 namespace BenchmarkDotNet.Diagnosers
@@ -21,5 +21,6 @@ namespace BenchmarkDotNet.Diagnosers
         public UnitType UnitType => UnitType.Dimensionless;
         public string Unit => "Count";
         public int PriorityInCategory => 0;
+        public bool GetIsAvailable(Metric metric) => true;
     }
 }

@@ -1,4 +1,3 @@
-﻿using System.Collections.Generic;
 using BenchmarkDotNet.Columns;
 using JetBrains.Annotations;
 
@@ -34,13 +33,24 @@ namespace BenchmarkDotNet.Reports
         [PublicAPI] bool TheGreaterTheBetter { get; }
 
         [PublicAPI] int PriorityInCategory { get; }
+
+        [PublicAPI] bool GetIsAvailable(Metric metric);
     }
 
     public class MetricDescriptorEqualityComparer : EqualityComparer<IMetricDescriptor>
     {
         public static readonly EqualityComparer<IMetricDescriptor> Instance = new MetricDescriptorEqualityComparer();
 
-        public override bool Equals(IMetricDescriptor x, IMetricDescriptor y) => x.Id.Equals(y.Id);
+        public override bool Equals(IMetricDescriptor? x, IMetricDescriptor? y)
+        {
+            if (ReferenceEquals(x, y))
+                return true;
+
+            if (x is null || y is null)
+                return false;
+
+            return string.Equals(x.Id, y.Id, StringComparison.Ordinal);
+        }
 
         public override int GetHashCode(IMetricDescriptor obj) => obj.Id.GetHashCode();
     }

@@ -1,7 +1,3 @@
-﻿using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
@@ -10,13 +6,13 @@ using BenchmarkDotNet.IntegrationTests.InProcess.EmitTests;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
+using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Loggers;
 using BenchmarkDotNet.Tests.XUnit;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
+using BenchmarkDotNet.Toolchains.Framework;
 using BenchmarkDotNet.Toolchains.Roslyn;
 using JetBrains.Annotations;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -29,16 +25,24 @@ namespace BenchmarkDotNet.IntegrationTests
 
         private const int UnrollFactor = 16;
 
-        private IConfig CreateInProcessConfig(OutputLogger logger)
+        private IConfig CreateInProcessConfig(OutputLogger? logger)
         {
             return new ManualConfig()
-                .AddJob(Job.Dry.WithToolchain(new InProcessEmitToolchain(TimeSpan.Zero, true)).WithInvocationCount(UnrollFactor).WithUnrollFactor(UnrollFactor))
+                .AddJob(Job.Dry.WithToolchain(InProcessEmitToolchain.Default).WithInvocationCount(UnrollFactor).WithUnrollFactor(UnrollFactor))
                 .AddLogger(logger ?? (Output != null ? new OutputLogger(Output) : ConsoleLogger.Default))
                 .AddColumnProvider(DefaultColumnProviders.Instance);
         }
 
-        private IConfig CreateInProcessAndRoslynConfig(OutputLogger logger)
+        private IConfig CreateInProcessAndCompiledConfig(OutputLogger logger, bool consumeTasksSynchronously = false)
         {
+            // The compiled job builds the same generated code the emitter mirrors, for DiffEmit to compare against.
+            var compiledJob = Job.Dry
+                .WithInvocationCount(4)
+                .WithUnrollFactor(4)
+                .WithConsumeTasksSynchronously(consumeTasksSynchronously);
+            if (Portability.RuntimeInformation.IsFullFramework)
+                compiledJob = compiledJob.WithToolchain(RoslynFrameworkToolchain.Default);
+
             var config = new ManualConfig()
                 .AddColumnProvider(DefaultConfig.Instance.GetColumnProviders().ToArray())
                 .AddAnalyser(DefaultConfig.Instance.GetAnalysers().ToArray())
@@ -47,32 +51,26 @@ namespace BenchmarkDotNet.IntegrationTests
                 .AddLogger(DefaultConfig.Instance.GetLoggers().ToArray())
                 .AddJob(
                     Job.Dry
-                        .WithToolchain(InProcessEmitToolchain.DontLogOutput)
+                        .WithToolchain(InProcessEmitToolchain.Default)
                         .WithInvocationCount(4)
-                        .WithUnrollFactor(4))
-                .AddJob(
-                    Job.Dry
-                        .WithToolchain(new RoslynToolchain())
-                        .WithInvocationCount(4)
-                        .WithUnrollFactor(4))
+                        .WithUnrollFactor(4)
+                        .WithConsumeTasksSynchronously(consumeTasksSynchronously))
+                .AddJob(compiledJob)
                 .WithOptions(ConfigOptions.KeepBenchmarkFiles)
                 .AddLogger(logger ?? (Output != null ? new OutputLogger(Output) : ConsoleLogger.Default));
 
             return config;
         }
 
-        private void DiffEmit(Summary summary)
+        private static void DiffEmit(Summary summary)
         {
-            // .Net Core does not support assembly saving so far
-            // SEE https://github.com/dotnet/corefx/issues/4491
-            if (!Portability.RuntimeInformation.IsFullFramework)
-                return;
-
-            var caseName = summary.BenchmarksCases.First().Job.ToString();
+            var emittedReport = summary.Reports.First(r => r.BenchmarkCase.GetToolchain() is InProcessEmitToolchain);
+            var compiledReport = summary.Reports.First(r => r.BenchmarkCase.GetToolchain() is not InProcessEmitToolchain);
             NaiveRunnableEmitDiff.RunDiff(
-                $@"{caseName}.exe",
-                $@"{caseName}Emitted.dll",
-                ConsoleLogger.Default);
+                compiledReport.BuildResult.ArtifactsPaths.ExecutablePath,
+                emittedReport.BuildResult.ArtifactsPaths.ExecutablePath,
+                ConsoleLogger.Default,
+                ignoreAggressiveOptimization: compiledReport.BenchmarkCase.GetToolchain() is RoslynToolchain);
         }
 
         [Fact]
@@ -104,18 +102,31 @@ namespace BenchmarkDotNet.IntegrationTests
             }
         }
 
-        [TheoryFullFrameworkOnly("We can't use Roslyn toolchain for .NET Core because we don't know which assemblies to reference and .NET Core does not support dynamic assembly saving")]
-        [InlineData(typeof(SampleBenchmark))]
-        [InlineData(typeof(RunnableVoidCaseBenchmark))]
-        [InlineData(typeof(RunnableRefStructCaseBenchmark))]
-        [InlineData(typeof(RunnableStructCaseBenchmark))]
-        [InlineData(typeof(RunnableClassCaseBenchmark))]
-        [InlineData(typeof(RunnableManyArgsCaseBenchmark))]
-        [InlineData(typeof(RunnableTaskCaseBenchmark))]
-        public void InProcessBenchmarkEmitsSameIL(Type benchmarkType)
+        [Theory]
+        [InlineData(typeof(SampleBenchmark), false)]
+        [InlineData(typeof(RunnableVoidCaseBenchmark), false)]
+        [InlineData(typeof(RunnableRefStructCaseBenchmark), false)]
+        // A by-ref-like parameter reached by an EXPLICIT operator. The emitter calls the operator it looks up,
+        // where the generated C# writes a cast the compiler resolves - and every by-ref-like type the BCL offers
+        // declares its conversion implicitly, so no other case here exercises that lookup.
+        [InlineData(typeof(RunnableExplicitConversionCaseBenchmark), false)]
+        [InlineData(typeof(RunnableStructCaseBenchmark), false)]
+        [InlineData(typeof(RunnableClassCaseBenchmark), false)]
+        [InlineData(typeof(RunnableManyArgsCaseBenchmark), false)]
+        [InlineData(typeof(RunnableRefArgsFromSourceBenchmark), false)] // ref parameters fed from [ArgumentsSource]
+        [InlineData(typeof(RunnableTaskCaseBenchmark), false)]
+        [InlineData(typeof(RunnableTaskCaseBenchmark), true)]
+        [InlineData(typeof(AsyncEnumerableBenchmarksTests.AsyncEnumerableBenchmarks), false)]
+        [InlineData(typeof(AsyncEnumerableBenchmarksTests.AsyncEnumerableCallerOverride), false)]
+        [InlineData(typeof(AsyncEnumerableBenchmarksTests.CustomAsyncEnumerableBenchmarks), false)]
+        [InlineData(typeof(AsyncEnumerableParamsSourceTests.StaticParamsSource), false)] // async IAsyncEnumerable [ParamsSource]
+        // A void, parameterless workload with an ASYNC setup/cleanup: the only case that runs the sync core
+        // emitter's setup state machines. RunnableTaskCaseBenchmark covers the Task-returning emitter's.
+        [InlineData(typeof(GlobalSetupCleanupTask), false)]
+        public void InProcessBenchmarkEmitsSameIL(Type benchmarkType, bool consumeTasksSynchronously)
         {
             var logger = new OutputLogger(Output);
-            var config = CreateInProcessAndRoslynConfig(logger);
+            var config = CreateInProcessAndCompiledConfig(logger, consumeTasksSynchronously);
 
             var summary = CanExecute(benchmarkType, config);
 
@@ -154,6 +165,13 @@ namespace BenchmarkDotNet.IntegrationTests
             }
 
             [Benchmark]
+            public async ValueTask InvokeOnceValueTaskAsync()
+            {
+                await Task.Yield();
+                Interlocked.Increment(ref Counter);
+            }
+
+            [Benchmark]
             public string InvokeOnceRefType()
             {
                 Interlocked.Increment(ref Counter);
@@ -183,6 +201,13 @@ namespace BenchmarkDotNet.IntegrationTests
             }
 
             [Benchmark]
+            public CustomAwaitable InvokeOnceCustomAwaitable()
+            {
+                Interlocked.Increment(ref Counter);
+                return new();
+            }
+
+            [Benchmark]
             public static void InvokeOnceStaticVoid()
             {
                 Interlocked.Increment(ref Counter);
@@ -190,6 +215,13 @@ namespace BenchmarkDotNet.IntegrationTests
 
             [Benchmark]
             public static async Task InvokeOnceStaticTaskAsync()
+            {
+                await Task.Yield();
+                Interlocked.Increment(ref Counter);
+            }
+
+            [Benchmark]
+            public static async ValueTask InvokeOnceStaticValueTaskAsync()
             {
                 await Task.Yield();
                 Interlocked.Increment(ref Counter);
@@ -223,37 +255,212 @@ namespace BenchmarkDotNet.IntegrationTests
                 Interlocked.Increment(ref Counter);
                 return new ValueTask<decimal>(DecimalResult);
             }
+
+            [Benchmark]
+            public static CustomAwaitable InvokeOnceStaticCustomAwaitable()
+            {
+                Interlocked.Increment(ref Counter);
+                return new();
+            }
         }
 
-        [Fact]
-        public void InProcessEmitToolchainSupportsIterationSetupAndCleanup()
+        [Theory]
+        [InlineData(typeof(IterationSetupCleanup))]
+        [InlineData(typeof(GlobalSetupCleanupTask))]
+        [InlineData(typeof(GlobalSetupCleanupValueTask))]
+        [InlineData(typeof(GlobalSetupCleanupValueTaskSource))]
+        [InlineData(typeof(GlobalSetupCleanupCustomAwaitable))]
+        public void InProcessEmitToolchainSupportsSetupAndCleanup(Type benchmarkType)
         {
             var logger = new OutputLogger(Output);
             var config = CreateInProcessConfig(logger);
 
-            WithIterationSetupAndCleanup.SetupCounter = 0;
-            WithIterationSetupAndCleanup.BenchmarkCounter = 0;
-            WithIterationSetupAndCleanup.CleanupCounter = 0;
+            Counters.SetupCounter = 0;
+            Counters.BenchmarkCounter = 0;
+            Counters.CleanupCounter = 0;
 
-            var summary = CanExecute<WithIterationSetupAndCleanup>(config);
+            var summary = CanExecute(benchmarkType, config);
 
-            Assert.Equal(1, WithIterationSetupAndCleanup.SetupCounter);
-            Assert.Equal(16, WithIterationSetupAndCleanup.BenchmarkCounter);
-            Assert.Equal(1, WithIterationSetupAndCleanup.CleanupCounter);
+            Assert.Equal(1, Counters.SetupCounter);
+            Assert.Equal(16, Counters.BenchmarkCounter);
+            Assert.Equal(1, Counters.CleanupCounter);
         }
 
-        public class WithIterationSetupAndCleanup
+        private static class Counters
         {
             public static int SetupCounter, BenchmarkCounter, CleanupCounter;
+        }
 
+        public class IterationSetupCleanup
+        {
             [IterationSetup]
-            public void Setup() => Interlocked.Increment(ref SetupCounter);
+            public void Setup() => Interlocked.Increment(ref Counters.SetupCounter);
 
             [Benchmark]
-            public void Benchmark() => Interlocked.Increment(ref BenchmarkCounter);
+            public void Benchmark() => Interlocked.Increment(ref Counters.BenchmarkCounter);
 
             [IterationCleanup]
-            public void Cleanup() => Interlocked.Increment(ref CleanupCounter);
+            public void Cleanup() => Interlocked.Increment(ref Counters.CleanupCounter);
         }
+
+        public class GlobalSetupCleanupTask
+        {
+            [GlobalSetup]
+            public static async Task GlobalSetup()
+            {
+                await Task.Yield();
+                Interlocked.Increment(ref Counters.SetupCounter);
+            }
+
+            [GlobalCleanup]
+            public async Task<int> GlobalCleanup()
+            {
+                await Task.Yield();
+                Interlocked.Increment(ref Counters.CleanupCounter);
+                return 42;
+            }
+
+            [Benchmark]
+            public void InvokeOnceVoid()
+            {
+                Interlocked.Increment(ref Counters.BenchmarkCounter);
+            }
+        }
+
+        public class GlobalSetupCleanupValueTask
+        {
+            [GlobalSetup]
+            public static async ValueTask GlobalSetup()
+            {
+                await Task.Yield();
+                Interlocked.Increment(ref Counters.SetupCounter);
+            }
+
+            [GlobalCleanup]
+            public async ValueTask<int> GlobalCleanup()
+            {
+                await Task.Yield();
+                Interlocked.Increment(ref Counters.CleanupCounter);
+                return 42;
+            }
+
+            [Benchmark]
+            public void InvokeOnceVoid()
+            {
+                Interlocked.Increment(ref Counters.BenchmarkCounter);
+            }
+        }
+
+        public class GlobalSetupCleanupValueTaskSource
+        {
+            private readonly static ValueTaskSource<int> valueTaskSource = new();
+
+            [GlobalSetup]
+            public static ValueTask GlobalSetup()
+            {
+                valueTaskSource.Reset();
+                Task.Delay(1).ContinueWith(_ =>
+                {
+                    Interlocked.Increment(ref Counters.SetupCounter);
+                    valueTaskSource.SetResult(42);
+                });
+                return new ValueTask(valueTaskSource, valueTaskSource.Token);
+            }
+
+            [GlobalCleanup]
+            public ValueTask<int> GlobalCleanup()
+            {
+                valueTaskSource.Reset();
+                Task.Delay(1).ContinueWith(_ =>
+                {
+                    Interlocked.Increment(ref Counters.CleanupCounter);
+                    valueTaskSource.SetResult(42);
+                });
+                return new ValueTask<int>(valueTaskSource, valueTaskSource.Token);
+            }
+
+            [Benchmark]
+            public void InvokeOnceVoid()
+            {
+                Interlocked.Increment(ref Counters.BenchmarkCounter);
+            }
+        }
+
+        public class GlobalSetupCleanupCustomAwaitable
+        {
+            [GlobalSetup]
+            public static CustomAwaitable GlobalSetup()
+            {
+                Interlocked.Increment(ref Counters.SetupCounter);
+                return new();
+            }
+
+            [GlobalCleanup]
+            public CustomAwaitable GlobalCleanup()
+            {
+                Interlocked.Increment(ref Counters.CleanupCounter);
+                return new();
+            }
+
+            [Benchmark]
+            public void InvokeOnceVoid()
+            {
+                Interlocked.Increment(ref Counters.BenchmarkCounter);
+            }
+        }
+
+
+        [Fact]
+        public void InProcessEmitRunsOnCallerThreadWhenConfigured()
+        {
+            var callerThreadId = Thread.CurrentThread.ManagedThreadId;
+            SameThreadBenchmarkEmit.CallerThreadId = callerThreadId;
+            SameThreadBenchmarkEmit.BenchmarkThreadId = -1;
+
+            var config = new ManualConfig()
+                .AddJob(Job.Dry
+                    .WithToolchain(InProcessEmitToolchain.From(new InProcessEmitSettings { ExecuteOnSeparateThread = false }))
+                    .WithInvocationCount(UnrollFactor)
+                    .WithUnrollFactor(UnrollFactor))
+                .AddLogger(Output != null ? new OutputLogger(Output) : ConsoleLogger.Default)
+                .AddColumnProvider(DefaultColumnProviders.Instance);
+
+            CanExecute<SameThreadBenchmarkEmit>(config);
+
+            Assert.Equal(callerThreadId, SameThreadBenchmarkEmit.BenchmarkThreadId);
+        }
+
+        [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
+        public class SameThreadBenchmarkEmit
+        {
+            public static int CallerThreadId;
+            public static int BenchmarkThreadId;
+
+            [Benchmark]
+            public void Benchmark()
+            {
+                BenchmarkThreadId = Thread.CurrentThread.ManagedThreadId;
+            }
+        }
+
+#if NET8_0_OR_GREATER
+        [Fact]
+        public void ParamsSupportRequiredProperty()
+        {
+            var config = CreateInProcessConfig(null);
+            CanExecute<ParamsTestRequiredProperty>(config);
+        }
+
+        public class ParamsTestRequiredProperty
+        {
+            private const string Expected = "a";
+
+            [Params(Expected)]
+            public required string ParamProperty { get; set; }
+
+            [Benchmark]
+            public void Benchmark() => Assert.Equal(Expected, ParamProperty);
+        }
+#endif
     }
 }

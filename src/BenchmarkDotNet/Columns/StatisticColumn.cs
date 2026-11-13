@@ -1,15 +1,14 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using JetBrains.Annotations;
-using Perfolizer.Common;
 using Perfolizer.Horology;
 using Perfolizer.Mathematics.Common;
 using Perfolizer.Mathematics.Multimodality;
+using Perfolizer.Metrology;
+using Pragmastat.Metrology;
 
 namespace BenchmarkDotNet.Columns
 {
@@ -38,7 +37,7 @@ namespace BenchmarkDotNet.Columns
             s => s.StandardDeviation, Priority.Main, parentColumn: Mean);
 
         public static readonly IColumn Error = new StatisticColumn(Column.Error, "Half of 99.9% confidence interval",
-            s => new ConfidenceInterval(s.Mean, s.StandardError, s.N, ConfidenceLevel.L999).Margin, Priority.Main, parentColumn: Mean);
+            s => s.GetConfidenceInterval(ConfidenceLevel.L999).Margin, Priority.Main, parentColumn: Mean);
 
         public static readonly IColumn OperationsPerSecond = new StatisticColumn(Column.OperationPerSecond, "Operation per second",
             s => 1.0 * 1000 * 1000 * 1000 / s.Mean, Priority.Additional, UnitType.Dimensionless);
@@ -67,7 +66,7 @@ namespace BenchmarkDotNet.Columns
         /// See http://www.brendangregg.com/FrequencyTrails/modes.html
         /// </summary>
         public static readonly IColumn MValue = new StatisticColumn(Column.MValue, "Modal value, see http://www.brendangregg.com/FrequencyTrails/modes.html",
-            s => MValueCalculator.Calculate(s.OriginalValues), Priority.Additional, UnitType.Dimensionless);
+            s => MValueCalculator.Calculate(s.Sample.Values), Priority.Additional, UnitType.Dimensionless);
 
         public static readonly IColumn Iterations = new StatisticColumn(Column.Iterations, "Number of target iterations",
             s => s.N, Priority.Additional, UnitType.Dimensionless);
@@ -84,30 +83,30 @@ namespace BenchmarkDotNet.Columns
 
         [PublicAPI]
         public static IColumn CiLower(ConfidenceLevel level) => new StatisticColumn(
-            $"CI{level.ToPercentStr()} Lower", $"Lower bound of {level.ToPercentStr()} confidence interval",
+            $"CI{level} Lower", $"Lower bound of {level} confidence interval",
             s => new ConfidenceInterval(s.Mean, s.StandardError, s.N, level).Lower, Priority.Additional);
 
         [PublicAPI]
         public static IColumn CiUpper(ConfidenceLevel level) => new StatisticColumn(
-            $"CI{level.ToPercentStr()} Upper", $"Upper bound of {level.ToPercentStr()} confidence interval",
+            $"CI{level} Upper", $"Upper bound of {level} confidence interval",
             s => new ConfidenceInterval(s.Mean, s.StandardError, s.N, level).Upper, Priority.Additional);
 
         [PublicAPI]
         public static IColumn CiError(ConfidenceLevel level) => new StatisticColumn(
-            $"CI{level.ToPercentStr()} Margin", $"Half of {level.ToPercentStr()} confidence interval",
+            $"CI{level} Margin", $"Half of {level} confidence interval",
             s => new ConfidenceInterval(s.Mean, s.StandardError, s.N, level).Margin, Priority.Additional);
 
 
-        public static readonly IColumn[] AllStatistics = { Mean, StdErr, StdDev, OperationsPerSecond, Min, Q1, Median, Q3, Max };
+        public static readonly IColumn[] AllStatistics = [Mean, StdErr, StdDev, OperationsPerSecond, Min, Q1, Median, Q3, Max];
 
         private readonly Func<Statistics, double> calc;
         public string Id => nameof(StatisticColumn) + "." + ColumnName;
         public string ColumnName { get; }
         private readonly Priority priority;
-        private readonly IStatisticColumn parentColumn;
+        private readonly IStatisticColumn? parentColumn;
 
         private StatisticColumn(string columnName, string legend, Func<Statistics, double> calc, Priority priority, UnitType type = UnitType.Time,
-            IStatisticColumn parentColumn = null)
+            IStatisticColumn? parentColumn = null)
         {
             this.calc = calc;
             this.priority = priority;
@@ -118,10 +117,10 @@ namespace BenchmarkDotNet.Columns
         }
 
         public string GetValue(Summary summary, BenchmarkCase benchmarkCase)
-            => Format(summary, benchmarkCase.Config, summary[benchmarkCase].ResultStatistics, SummaryStyle.Default);
+            => Format(summary, benchmarkCase.Config, summary[benchmarkCase]?.ResultStatistics, SummaryStyle.Default);
 
         public string GetValue(Summary summary, BenchmarkCase benchmarkCase, SummaryStyle style)
-            => Format(summary, benchmarkCase.Config, summary[benchmarkCase].ResultStatistics, style);
+            => Format(summary, benchmarkCase.Config, summary[benchmarkCase]?.ResultStatistics, style);
 
         public bool IsAvailable(Summary summary) => true;
         public bool AlwaysShow => true;
@@ -133,18 +132,19 @@ namespace BenchmarkDotNet.Columns
         public string Legend { get; }
 
         public List<double> GetAllValues(Summary summary, SummaryStyle style)
-            => summary.Reports
+        {
+            return summary.Reports
                 .Where(r => r.ResultStatistics != null)
-                .Select(r => calc(r.ResultStatistics))
+                .Select(r => calc(r.ResultStatistics!))
                 .Where(v => !double.IsNaN(v) && !double.IsInfinity(v))
-                .Select(v => UnitType == UnitType.Time ? v / style.TimeUnit.NanosecondAmount : v)
+                .Select(v => UnitType == UnitType.Time && style.TimeUnit != null ? v / style.TimeUnit.BaseUnits : v)
                 .ToList();
+        }
 
-        private string Format(Summary summary, ImmutableConfig config, Statistics statistics, SummaryStyle style)
+        private string Format(Summary summary, ImmutableConfig config, Statistics? statistics, SummaryStyle style)
         {
             if (statistics == null)
                 return "NA";
-
             int precision = summary.DisplayPrecisionManager.GetPrecision(style, this, parentColumn);
             string format = "N" + precision;
 
@@ -152,12 +152,11 @@ namespace BenchmarkDotNet.Columns
             if (double.IsNaN(value))
                 return "NA";
             return UnitType == UnitType.Time
-                ? TimeInterval.FromNanoseconds(value)
-                    .ToString(
-                        style.TimeUnit,
-                        style.CultureInfo,
-                        format,
-                        UnitPresentation.FromVisibility(style.PrintUnitsInContent))
+                ? UnitHelper.Format(
+                    TimeInterval.FromNanoseconds(value).ToMeasurement(style.TimeUnit),
+                    format,
+                    style.CultureInfo,
+                    style.PrintUnitsInContent)
                 : value.ToString(format, style.CultureInfo);
         }
 

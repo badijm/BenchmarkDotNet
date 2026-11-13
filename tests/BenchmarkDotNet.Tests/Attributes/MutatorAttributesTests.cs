@@ -1,8 +1,5 @@
-﻿using System;
-using System.Linq;
-using System.Reflection;
 using BenchmarkDotNet.Attributes;
-using Xunit;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Tests.Attributes
 {

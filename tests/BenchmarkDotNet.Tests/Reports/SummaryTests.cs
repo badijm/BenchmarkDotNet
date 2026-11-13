@@ -1,7 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
@@ -12,8 +8,7 @@ using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Builders;
 using BenchmarkDotNet.Toolchains;
 using BenchmarkDotNet.Toolchains.Results;
-using BenchmarkDotNet.Validators;
-using Xunit;
+using System.Collections.Immutable;
 using RunMode = BenchmarkDotNet.Jobs.RunMode;
 
 namespace BenchmarkDotNet.Tests.Reports
@@ -35,8 +30,8 @@ namespace BenchmarkDotNet.Tests.Reports
         private static IConfig CreateConfig()
         {
             // We use runtime as selector later. It is chosen as selector just to be close to initial issue. Nothing particularly special about it.
-            Job coreJob = new Job(Job.Default).WithRuntime(CoreRuntime.Core20).ApplyAndFreeze(RunMode.Dry);
-            Job clrJob = new Job(Job.Default).WithRuntime(ClrRuntime.Net462).ApplyAndFreeze(RunMode.Dry);
+            Job coreJob = new Job(Job.Default).WithRuntime(CoreRuntime.Core80).ApplyAndFreeze(RunMode.Dry);
+            Job clrJob = new Job(Job.Default).WithRuntime(ClrRuntime.Net472).ApplyAndFreeze(RunMode.Dry);
             return ManualConfig.Create(DefaultConfig.Instance).AddJob(coreJob).AddJob(clrJob);
         }
 
@@ -48,32 +43,30 @@ namespace BenchmarkDotNet.Tests.Reports
 
         private static BenchmarkReport CreateReport(BenchmarkCase benchmark)
         {
-            return benchmark.Job.Environment.Runtime is ClrRuntime
+            return benchmark.GetRuntime() is ClrRuntime
                 ? CreateFailureReport(benchmark)
                 : CreateSuccessReport(benchmark);
         }
 
         private static BenchmarkReport CreateFailureReport(BenchmarkCase benchmark)
         {
-            GenerateResult generateResult = GenerateResult.Failure(ArtifactsPaths.Empty, Array.Empty<string>());
-            BuildResult buildResult = BuildResult.Failure(generateResult, string.Empty);
+            BuildResult buildResult = BuildResult.Failure(ArtifactsPaths.Empty, string.Empty);
             // Null may be legitimately passed as metrics to BenchmarkReport ctor here:
             // https://github.com/dotnet/BenchmarkDotNet/blob/89255c9fceb1b27c475a93d08c152349be4199e9/src/BenchmarkDotNet/Running/BenchmarkRunner.cs#L197
-            return new BenchmarkReport(false, benchmark, generateResult, buildResult, default, default);
+            return new BenchmarkReport(false, benchmark, buildResult, default, default);
         }
 
         private static BenchmarkReport CreateSuccessReport(BenchmarkCase benchmark)
         {
-            GenerateResult generateResult = GenerateResult.Success(ArtifactsPaths.Empty, Array.Empty<string>());
-            BuildResult buildResult = BuildResult.Success(generateResult);
+            BuildResult buildResult = BuildResult.Success(ArtifactsPaths.Empty);
             var metrics = new[] { new Metric(new FakeMetricDescriptor(), Math.E) };
-            return new BenchmarkReport(true, benchmark, generateResult, buildResult, Array.Empty<ExecuteResult>(), metrics);
+            return new BenchmarkReport(true, benchmark, buildResult, [], metrics);
         }
 
         private static Summary CreateSummary(IList<BenchmarkReport> reports)
         {
             HostEnvironmentInfo hostEnvironmentInfo = new HostEnvironmentInfoBuilder().Build();
-            return new Summary("MockSummary", reports.ToImmutableArray(), hostEnvironmentInfo, string.Empty, string.Empty, TimeSpan.FromMinutes(1.0), TestCultureInfo.Instance, ImmutableArray<ValidationError>.Empty, ImmutableArray<IColumnHidingRule>.Empty);
+            return new Summary("MockSummary", reports.ToImmutableArray(), hostEnvironmentInfo, string.Empty, string.Empty, TimeSpan.FromMinutes(1.0), TestCultureInfo.Instance, [], []);
         }
 
         public class MockBenchmarkClass
@@ -92,6 +85,7 @@ namespace BenchmarkDotNet.Tests.Reports
             public string Unit { get; } = nameof(Unit);
             public bool TheGreaterTheBetter { get; }
             public int PriorityInCategory => 0;
+            public bool GetIsAvailable(Metric metric) => true;
         }
     }
 }

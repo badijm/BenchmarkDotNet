@@ -1,5 +1,3 @@
-﻿using System;
-using System.IO;
 using System.Xml;
 
 namespace BenchmarkDotNet.Exporters.Xml
@@ -10,9 +8,6 @@ namespace BenchmarkDotNet.Exporters.Xml
 
         public SimpleXmlWriter(TextWriter writer, bool indent)
         {
-            if (writer == null)
-                throw new ArgumentNullException(nameof(writer));
-
             this.writer = XmlWriter.Create(writer, new XmlWriterSettings { Indent = indent });
         }
 

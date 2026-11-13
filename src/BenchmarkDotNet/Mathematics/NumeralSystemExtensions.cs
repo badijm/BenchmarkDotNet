@@ -1,5 +1,3 @@
-﻿using System;
-
 namespace BenchmarkDotNet.Mathematics
 {
     public static class NumeralSystemExtensions

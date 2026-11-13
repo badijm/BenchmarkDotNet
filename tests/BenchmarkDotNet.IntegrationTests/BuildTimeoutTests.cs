@@ -1,16 +1,14 @@
-﻿using System;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Toolchains.NativeAot;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
-    public class BuildTimeoutTests: BenchmarkTestExecutor
+    public class BuildTimeoutTests : BenchmarkTestExecutor
     {
         public BuildTimeoutTests(ITestOutputHelper outputHelper) : base(outputHelper) { }
 
@@ -19,7 +17,7 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             if (!RuntimeInformation.Is64BitPlatform()) // NativeAOT does not support 32bit yet
                 return;
-            if (RuntimeInformation.IsMacOS())
+            if (OsDetector.IsMacOS())
                 return; // currently not supported
 
             // we use NativeAOT on purpose because it takes a LOT of time to build it
@@ -29,11 +27,8 @@ namespace BenchmarkDotNet.IntegrationTests
             var config = ManualConfig.CreateEmpty()
                 .WithBuildTimeout(timeout)
                 .AddJob(Job.Dry
-                    .WithRuntime(NativeAotRuntime.Net70)
-                    .WithToolchain(NativeAotToolchain.CreateBuilder()
-                        .UseNuGet("7.0.0", "https://api.nuget.org/v3/index.json")
-                        .TargetFrameworkMoniker("net7.0")
-                        .ToToolchain()));
+                    .WithToolchain(CsProjNativeAotToolchain.From(NativeAotRuntime.Net80,
+                        new NativeAotSettings().WithNuGet("8.0.0", "https://api.nuget.org/v3/index.json"))));
 
             var summary = CanExecute<NativeAotBenchmark>(config, fullValidation: false);
 

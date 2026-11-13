@@ -1,24 +1,24 @@
-﻿using System;
-using System.Globalization;
-using System.IO;
-using System.Text;
 using BenchmarkDotNet.Extensions;
 using Perfolizer.Horology;
-using SimpleJson.Reflection;
+using System.Globalization;
+using System.Text;
 
 namespace BenchmarkDotNet.Helpers
 {
     public static class FolderNameHelper
     {
-        public static string ToFolderName(object value)
+        public static string ToFolderName(object? value)
         {
-            switch (value) {
+            switch (value)
+            {
+                case null:
+                    return "null";
                 case bool b:
                     return b.ToLowerCase();
                 case string s:
                     return Escape(new StringBuilder(s));
                 case char c:
-                    return ((int)c).ToString(); // TODO: rewrite
+                    return ((int) c).ToString(); // TODO: rewrite
                 case float f:
                     return f.ToString("F", CultureInfo.InvariantCulture).Replace(".", "-");
                 case double d:
@@ -27,22 +27,23 @@ namespace BenchmarkDotNet.Helpers
                     return d.ToString("F", CultureInfo.InvariantCulture).Replace(".", "-");
             }
 
-            if (ReflectionUtils.GetTypeInfo(value.GetType()).IsEnum)
-                return value.ToString();
+            var valueType = value.GetType();
+            if (valueType.IsEnum)
+                return value.ToString()!;
             if (value is Type type)
                 return ToFolderName(type: type);
-            if (!ReflectionUtils.GetTypeInfo(value.GetType()).IsValueType)
-                return value.GetType().Name; // TODO
+            if (!valueType.IsValueType)
+                return valueType.Name;
             if (value is TimeInterval interval)
                 return interval.Nanoseconds + "ns";
 
-            return value.ToString();
+            return value.ToString()!;
         }
 
         // we can't simply use type.FullName, because for generics it's too long
         // example: typeof(List<int>).FullName => "System.Collections.Generic.List`1[[System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]"
         public static string ToFolderName(Type type, bool includeNamespace = true, bool includeGenericArgumentsNamespace = false)
-            => Escape(new StringBuilder(type.GetCorrectCSharpTypeName(includeNamespace, includeGenericArgumentsNamespace)));
+            => Escape(new StringBuilder(type.GetCorrectCSharpTypeName(includeNamespace, includeGenericArgumentsNamespace, prefixWithGlobal: false)));
 
         private static string Escape(StringBuilder builder)
         {

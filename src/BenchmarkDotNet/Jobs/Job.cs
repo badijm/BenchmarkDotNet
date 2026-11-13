@@ -1,6 +1,5 @@
-﻿using BenchmarkDotNet.Characteristics;
+using BenchmarkDotNet.Characteristics;
 using JetBrains.Annotations;
-using System;
 using System.Diagnostics.CodeAnalysis;
 
 namespace BenchmarkDotNet.Jobs
@@ -29,9 +28,8 @@ namespace BenchmarkDotNet.Jobs
 
         // Infrastructure
         public static readonly Job InProcess = new Job(nameof(InProcess), InfrastructureMode.InProcess);
-        public static readonly Job InProcessDontLogOutput = new Job(nameof(InProcessDontLogOutput), InfrastructureMode.InProcessDontLogOutput);
 
-        public Job() : this((string)null) { }
+        public Job() : this("") { }
 
         public Job(string id) : base(id)
         {
@@ -42,11 +40,11 @@ namespace BenchmarkDotNet.Jobs
             MetaCharacteristic[this] = new MetaMode();
         }
 
-        public Job(CharacteristicObject other) : this((string)null, other)
+        public Job(CharacteristicObject other) : this("", other)
         {
         }
 
-        public Job(params CharacteristicObject[] others) : this(null, others)
+        public Job(params CharacteristicObject[] others) : this("", others)
         {
         }
 
@@ -60,11 +58,11 @@ namespace BenchmarkDotNet.Jobs
             Apply(others);
         }
 
-        public EnvironmentMode Environment => EnvironmentCharacteristic[this];
-        public RunMode Run => RunCharacteristic[this];
-        public InfrastructureMode Infrastructure => InfrastructureCharacteristic[this];
-        public AccuracyMode Accuracy => AccuracyCharacteristic[this];
-        public MetaMode Meta => MetaCharacteristic[this];
+        public EnvironmentMode Environment => EnvironmentCharacteristic[this]!;
+        public RunMode Run => RunCharacteristic[this]!;
+        public InfrastructureMode Infrastructure => InfrastructureCharacteristic[this]!;
+        public AccuracyMode Accuracy => AccuracyCharacteristic[this]!;
+        public MetaMode Meta => MetaCharacteristic[this]!;
 
         public string ResolvedId => HasValue(IdCharacteristic) ? Id : JobIdGenerator.GenerateRandomId(this);
         public string FolderInfo => ResolvedId;
@@ -73,7 +71,7 @@ namespace BenchmarkDotNet.Jobs
         {
             get
             {
-                string props = ResolveId(this, null);
+                string props = ResolveId(this, "");
                 return props == IdCharacteristic.FallbackValue
                     ? ResolvedId
                     : ResolvedId + $"({props})";

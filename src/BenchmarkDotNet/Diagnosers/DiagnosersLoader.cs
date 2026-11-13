@@ -1,12 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Threading;
 using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Portability;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Diagnosers
 {
@@ -40,11 +36,11 @@ namespace BenchmarkDotNet.Diagnosers
             {
                 yield return EventPipeProfiler.Default;
 
-                if (RuntimeInformation.IsLinux())
+                if (OsDetector.IsLinux())
                     yield return PerfCollectProfiler.Default;
             }
 
-            if (!RuntimeInformation.IsWindows())
+            if (!OsDetector.IsWindows())
                 yield break;
 
             foreach (var windowsDiagnoser in LoadWindowsDiagnosers())
@@ -67,28 +63,33 @@ namespace BenchmarkDotNet.Diagnosers
                         $"Does not match: {Path.GetFileName(benchmarkDotNetAssembly.Location)} version {benchmarkDotNetAssembly.GetName().Version}";
                     ConsoleLogger.Default.WriteLineError(errorMsg);
 
-                    return Array.Empty<IDiagnoser>();
+                    return [];
                 }
 
-                return new[]
-                {
+                return
+                [
                     CreateDiagnoser(diagnosticsAssembly, "BenchmarkDotNet.Diagnostics.Windows.InliningDiagnoser"),
                     CreateDiagnoser(diagnosticsAssembly, "BenchmarkDotNet.Diagnostics.Windows.TailCallDiagnoser"),
                     CreateDiagnoser(diagnosticsAssembly, "BenchmarkDotNet.Diagnostics.Windows.JitStatsDiagnoser"),
                     CreateDiagnoser(diagnosticsAssembly, "BenchmarkDotNet.Diagnostics.Windows.EtwProfiler"),
                     CreateDiagnoser(diagnosticsAssembly, "BenchmarkDotNet.Diagnostics.Windows.ConcurrencyVisualizerProfiler"),
                     CreateDiagnoser(diagnosticsAssembly, "BenchmarkDotNet.Diagnostics.Windows.NativeMemoryProfiler")
-                };
+                ];
+            }
+            catch (Exception ex) when (ex is FileNotFoundException || ex is BadImageFormatException)
+            {
+                // Return an array of UnresolvedDiagnoser objects when the assembly does not contain the requested diagnoser
+                return [GetUnresolvedDiagnoser<IDiagnoser>()];
             }
             catch (Exception ex) // we're loading a plug-in, better to be safe rather than sorry
             {
                 ConsoleLogger.Default.WriteLineError($"Error loading {WindowsDiagnosticAssemblyFileName}: {ex.GetType().Name} - {ex.Message}");
 
-                return Array.Empty<IDiagnoser>();
+                return [];
             }
         }
 
         private static IDiagnoser CreateDiagnoser(Assembly loadedAssembly, string typeName)
-            => (IDiagnoser)Activator.CreateInstance(loadedAssembly.GetType(typeName));
+            => (IDiagnoser) Activator.CreateInstance(loadedAssembly.GetType(typeName)!)!;
     }
 }

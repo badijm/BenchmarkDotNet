@@ -1,6 +1,5 @@
-﻿using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Running;
 
 namespace BenchmarkDotNet.ConsoleArguments.ListBenchmarks
 {
@@ -12,9 +11,13 @@ namespace BenchmarkDotNet.ConsoleArguments.ListBenchmarks
         private const string Vertical = " │ ";
         private const string Space = "   ";
 
-        public void Print(IEnumerable<string> testNames, ILogger logger)
+        public void Print(IEnumerable<BenchmarkCase> benchmarkCases, ILogger logger)
         {
-            List<Node> topLevelNodes = new List<Node>();
+            var testNames = benchmarkCases
+                .Select(p => p.Descriptor.GetFilterName())
+                .Distinct();
+
+            List<Node> topLevelNodes = [];
 
             foreach (string test in testNames)
             {

@@ -1,6 +1,5 @@
-﻿using System;
-using System.Diagnostics.CodeAnalysis;
 using BenchmarkDotNet.Characteristics;
+using System.Diagnostics.CodeAnalysis;
 
 namespace BenchmarkDotNet.Jobs
 {
@@ -112,7 +111,7 @@ namespace BenchmarkDotNet.Jobs
             set { HeapCountCharacteristic[this] = value; }
         }
 
-        public bool Equals(GcMode other)
+        public bool Equals(GcMode? other)
             => other != null
                 && other.AllowVeryLargeObjects == AllowVeryLargeObjects
                 && other.Concurrent == Concurrent

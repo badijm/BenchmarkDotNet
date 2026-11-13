@@ -1,4 +1,3 @@
-﻿using System;
 using System.Diagnostics.CodeAnalysis;
 using static BenchmarkDotNet.Characteristics.CharacteristicHelper;
 
@@ -24,7 +23,7 @@ namespace BenchmarkDotNet.Characteristics
                 null, fallbackValue,
                 false);
 
-        public static Characteristic<T> Create<TOwner, [DynamicallyAccessedMembers(CharacteristicObject.CharacteristicMemberTypes)] T>(string memberName, Func<CharacteristicObject, T, T> resolver, T fallbackValue, bool ignoreOnApply)
+        public static Characteristic<T> Create<TOwner, [DynamicallyAccessedMembers(CharacteristicObject.CharacteristicMemberTypes)] T>(string memberName, Func<CharacteristicObject, T?, T> resolver, T fallbackValue, bool ignoreOnApply)
             where TOwner : CharacteristicObject
             => new Characteristic<T>(
                 memberName,
@@ -52,16 +51,11 @@ namespace BenchmarkDotNet.Characteristics
             string id,
             [DynamicallyAccessedMembers(CharacteristicObject.CharacteristicMemberTypes)] Type characteristicType,
             Type declaringType,
-            object fallbackValue,
+            object? fallbackValue,
             bool ignoreOnApply,
             bool dontShowInSummary = false)
         {
-            if (string.IsNullOrEmpty(id))
-                throw new ArgumentNullException(nameof(id));
-            if (characteristicType == null)
-                throw new ArgumentNullException(nameof(characteristicType));
-            if (declaringType == null)
-                throw new ArgumentNullException(nameof(declaringType));
+            ArgumentException.ThrowIfNullOrEmpty(id);
 
             Id = id;
             CharacteristicType = characteristicType;
@@ -84,9 +78,9 @@ namespace BenchmarkDotNet.Characteristics
 
         public Type DeclaringType { get; }
 
-        private object FallbackValue { get; }
+        private object? FallbackValue { get; }
 
-        public object this[CharacteristicObject obj]
+        public object? this[CharacteristicObject obj]
         {
             get { return obj.GetValue(this); }
             set { obj.SetValue(this, value); }
@@ -94,7 +88,7 @@ namespace BenchmarkDotNet.Characteristics
 
         public bool HasChildCharacteristics => IsCharacteristicObjectSubclass(CharacteristicType);
 
-        internal virtual object ResolveValueCore(CharacteristicObject obj, object currentValue) =>
+        internal virtual object? ResolveValueCore(CharacteristicObject obj, object? currentValue) =>
             ReferenceEquals(currentValue, EmptyValue) ? FallbackValue : currentValue;
 
         public override string ToString() => Id;

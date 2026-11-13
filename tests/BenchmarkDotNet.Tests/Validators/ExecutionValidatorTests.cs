@@ -1,20 +1,17 @@
-﻿using System;
-using System.Linq;
-using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
 using JetBrains.Annotations;
-using Xunit;
+using System.Threading.Tasks.Sources;
 
 namespace BenchmarkDotNet.Tests.Validators
 {
     public class ExecutionValidatorTests
     {
         [Fact]
-        public void FailingConstructorsAreDiscovered()
+        public async Task FailingConstructorsAreDiscovered()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(FailingConstructor))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(FailingConstructor))).ToArrayAsync();
 
             Assert.NotEmpty(validationErrors);
             Assert.StartsWith("Unable to create instance of FailingConstructor", validationErrors.Single().Message);
@@ -30,9 +27,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void FailingGlobalSetupsAreDiscovered()
+        public async Task FailingGlobalSetupsAreDiscovered()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(FailingGlobalSetup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(FailingGlobalSetup))).ToArrayAsync();
 
             Assert.NotEmpty(validationErrors);
             Assert.StartsWith("Failed to execute [GlobalSetup]", validationErrors.Single().Message);
@@ -49,9 +46,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void FailingGlobalCleanupsAreDiscovered()
+        public async Task FailingGlobalCleanupsAreDiscovered()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(FailingGlobalCleanup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(FailingGlobalCleanup))).ToArrayAsync();
 
             Assert.NotEmpty(validationErrors);
             Assert.StartsWith("Failed to execute [GlobalCleanup]", validationErrors.Single().Message);
@@ -68,52 +65,10 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void MultipleGlobalSetupsAreDiscovered()
-        {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(MultipleGlobalSetups))).ToList();
-
-            Assert.NotEmpty(validationErrors);
-            Assert.StartsWith("Only single [GlobalSetup] method is allowed per type", validationErrors.Single().Message);
-        }
-
-        public class MultipleGlobalSetups
-        {
-            [GlobalSetup]
-            public void First() { }
-
-            [GlobalSetup]
-            public void Second() { }
-
-            [Benchmark]
-            public void NonThrowing() { }
-        }
-
-        [Fact]
-        public void MultipleGlobalCleanupsAreDiscovered()
-        {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(MultipleGlobalCleanups))).ToList();
-
-            Assert.NotEmpty(validationErrors);
-            Assert.StartsWith("Only single [GlobalCleanup] method is allowed per type", validationErrors.Single().Message);
-        }
-
-        public class MultipleGlobalCleanups
-        {
-            [GlobalCleanup]
-            public void First() { }
-
-            [GlobalCleanup]
-            public void Second() { }
-
-            [Benchmark]
-            public void NonThrowing() { }
-        }
-
-        [Fact]
-        public void VirtualGlobalSetupsAreSupported()
+        public async Task VirtualGlobalSetupsAreSupported()
         {
             Assert.False(OverridesGlobalSetup.WasCalled);
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(OverridesGlobalSetup)));
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(OverridesGlobalSetup))).ToArrayAsync();
 
             Assert.True(OverridesGlobalSetup.WasCalled);
             Assert.Empty(validationErrors);
@@ -137,10 +92,10 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void VirtualGlobalCleanupsAreSupported()
+        public async Task VirtualGlobalCleanupsAreSupported()
         {
             Assert.False(OverridesGlobalCleanup.WasCalled);
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(OverridesGlobalCleanup)));
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(OverridesGlobalCleanup))).ToArrayAsync();
 
             Assert.True(OverridesGlobalCleanup.WasCalled);
             Assert.Empty(validationErrors);
@@ -164,9 +119,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void NonFailingGlobalSetupsAreOmitted()
+        public async Task NonFailingGlobalSetupsAreOmitted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(GlobalSetupThatRequiresParamsToBeSetFirst)));
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(GlobalSetupThatRequiresParamsToBeSetFirst))).ToArrayAsync();
 
             Assert.Empty(validationErrors);
         }
@@ -188,10 +143,39 @@ namespace BenchmarkDotNet.Tests.Validators
             public void NonThrowing() { }
         }
 
+        // #848
         [Fact]
-        public void NonFailingGlobalCleanupsAreOmitted()
+        public async Task ParamsSourcePropertyIsSetBeforeGlobalSetup()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(GlobalCleanupThatRequiresParamsToBeSetFirst)));
+            var validationErrors = await ExecutionValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(GlobalSetupThatRequiresParamsSourceToBeSetFirst)))
+                .ToArrayAsync();
+
+            Assert.Empty(validationErrors);
+        }
+
+        public class GlobalSetupThatRequiresParamsSourceToBeSetFirst
+        {
+            [ParamsSource(nameof(GetValues))]
+            public int Field { get; set; }
+
+            public static IEnumerable<int> GetValues() => [100];
+
+            [GlobalSetup]
+            public void Failing()
+            {
+                if (Field == default)
+                    throw new Exception("ParamsSource property was not set before GlobalSetup");
+            }
+
+            [Benchmark]
+            public void NonThrowing() { }
+        }
+
+        [Fact]
+        public async Task NonFailingGlobalCleanupsAreOmitted()
+        {
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(GlobalCleanupThatRequiresParamsToBeSetFirst))).ToArrayAsync();
 
             Assert.Empty(validationErrors);
         }
@@ -214,11 +198,11 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void MissingParamsAttributeThatMakesGlobalSetupsFailAreDiscovered()
+        public async Task MissingParamsAttributeThatMakesGlobalSetupsFailAreDiscovered()
         {
-            var validationErrors = ExecutionValidator.FailOnError
-                .Validate(BenchmarkConverter.TypeToBenchmarks(typeof(FailingGlobalSetupWhichShouldHaveHadParamsForField)))
-                .ToList();
+            var validationErrors = await ExecutionValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(FailingGlobalSetupWhichShouldHaveHadParamsForField)))
+                .ToArrayAsync();
 
             Assert.NotEmpty(validationErrors);
             Assert.StartsWith("Failed to execute [GlobalSetup]", validationErrors.Single().Message);
@@ -241,11 +225,11 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void MissingParamsAttributeThatMakesGlobalCleanupsFailAreDiscovered()
+        public async Task MissingParamsAttributeThatMakesGlobalCleanupsFailAreDiscovered()
         {
-            var validationErrors = ExecutionValidator.FailOnError
-                .Validate(BenchmarkConverter.TypeToBenchmarks(typeof(FailingGlobalCleanupWhichShouldHaveHadParamsForField)))
-                .ToList();
+            var validationErrors = await ExecutionValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(FailingGlobalCleanupWhichShouldHaveHadParamsForField)))
+                .ToArrayAsync();
 
             Assert.NotEmpty(validationErrors);
             Assert.StartsWith("Failed to execute [GlobalCleanup]", validationErrors.Single().Message);
@@ -268,29 +252,6 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void NonPublicFieldsWithParamsAreDiscovered()
-        {
-            var validationErrors = ExecutionValidator.FailOnError
-                .Validate(BenchmarkConverter.TypeToBenchmarks(typeof(NonPublicFieldWithParams)))
-                .ToList();
-
-            Assert.NotEmpty(validationErrors);
-            Assert.StartsWith("Fields marked with [Params] must be public", validationErrors.Single().Message);
-        }
-
-        public class NonPublicFieldWithParams
-        {
-#pragma warning disable CS0649
-            [Params(1)]
-            [UsedImplicitly]
-            internal int Field;
-#pragma warning restore CS0649
-
-            [Benchmark]
-            public void NonThrowing() { }
-        }
-
-        [Fact]
         public void FieldsWithoutParamsValuesAreDiscovered()
         {
             Assert.Empty(BenchmarkConverter.TypeToBenchmarks(typeof(FieldsWithoutParamsValues)).BenchmarksCases);
@@ -298,7 +259,9 @@ namespace BenchmarkDotNet.Tests.Validators
 
         public class FieldsWithoutParamsValues
         {
+#pragma warning disable BDN1300
             [Params]
+#pragma warning restore BDN1300
             [UsedImplicitly]
             public int FieldWithoutValuesSpecified;
 
@@ -307,9 +270,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void NonFailingBenchmarksAreOmitted()
+        public async Task NonFailingBenchmarksAreOmitted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(NonFailingBenchmark)));
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(NonFailingBenchmark))).ToArrayAsync();
 
             Assert.Empty(validationErrors);
         }
@@ -321,9 +284,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void FailingBenchmarksAreDiscovered()
+        public async Task FailingBenchmarksAreDiscovered()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(FailingBenchmark))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(FailingBenchmark))).ToArrayAsync();
 
             Assert.NotEmpty(validationErrors);
             Assert.Contains(validationErrors, error => error.Message.Contains("This benchmark throws"));
@@ -336,9 +299,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void MultipleParamsDoNotMultiplyGlobalSetup()
+        public async Task MultipleParamsDoNotMultiplyGlobalSetup()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(MultipleParamsAndSingleGlobalSetup)));
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(MultipleParamsAndSingleGlobalSetup))).ToArrayAsync();
 
             Assert.Empty(validationErrors);
         }
@@ -357,9 +320,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void AsyncTaskGlobalSetupIsExecuted()
+        public async Task AsyncTaskGlobalSetupIsExecuted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncTaskGlobalSetup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncTaskGlobalSetup))).ToArrayAsync();
 
             Assert.True(AsyncTaskGlobalSetup.WasCalled);
             Assert.Empty(validationErrors);
@@ -382,9 +345,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void AsyncTaskGlobalCleanupIsExecuted()
+        public async Task AsyncTaskGlobalCleanupIsExecuted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncTaskGlobalCleanup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncTaskGlobalCleanup))).ToArrayAsync();
 
             Assert.True(AsyncTaskGlobalCleanup.WasCalled);
             Assert.Empty(validationErrors);
@@ -407,9 +370,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void AsyncGenericTaskGlobalSetupIsExecuted()
+        public async Task AsyncGenericTaskGlobalSetupIsExecuted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncGenericTaskGlobalSetup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncGenericTaskGlobalSetup))).ToArrayAsync();
 
             Assert.True(AsyncGenericTaskGlobalSetup.WasCalled);
             Assert.Empty(validationErrors);
@@ -434,9 +397,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void AsyncGenericTaskGlobalCleanupIsExecuted()
+        public async Task AsyncGenericTaskGlobalCleanupIsExecuted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncGenericTaskGlobalCleanup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncGenericTaskGlobalCleanup))).ToArrayAsync();
 
             Assert.True(AsyncGenericTaskGlobalCleanup.WasCalled);
             Assert.Empty(validationErrors);
@@ -461,9 +424,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void AsyncValueTaskGlobalSetupIsExecuted()
+        public async Task AsyncValueTaskGlobalSetupIsExecuted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncValueTaskGlobalSetup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncValueTaskGlobalSetup))).ToArrayAsync();
 
             Assert.True(AsyncValueTaskGlobalSetup.WasCalled);
             Assert.Empty(validationErrors);
@@ -486,9 +449,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void AsyncValueTaskGlobalCleanupIsExecuted()
+        public async Task AsyncValueTaskGlobalCleanupIsExecuted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncValueTaskGlobalCleanup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncValueTaskGlobalCleanup))).ToArrayAsync();
 
             Assert.True(AsyncValueTaskGlobalCleanup.WasCalled);
             Assert.Empty(validationErrors);
@@ -511,9 +474,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void AsyncGenericValueTaskGlobalSetupIsExecuted()
+        public async Task AsyncGenericValueTaskGlobalSetupIsExecuted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncGenericValueTaskGlobalSetup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncGenericValueTaskGlobalSetup))).ToArrayAsync();
 
             Assert.True(AsyncGenericValueTaskGlobalSetup.WasCalled);
             Assert.Empty(validationErrors);
@@ -538,9 +501,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void AsyncGenericValueTaskGlobalCleanupIsExecuted()
+        public async Task AsyncGenericValueTaskGlobalCleanupIsExecuted()
         {
-            var validationErrors = ExecutionValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncGenericValueTaskGlobalCleanup))).ToList();
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncGenericValueTaskGlobalCleanup))).ToArrayAsync();
 
             Assert.True(AsyncGenericValueTaskGlobalCleanup.WasCalled);
             Assert.Empty(validationErrors);
@@ -562,6 +525,207 @@ namespace BenchmarkDotNet.Tests.Validators
 
             [Benchmark]
             public void NonThrowing() { }
+        }
+
+        private class ValueTaskSource<T> : IValueTaskSource<T>, IValueTaskSource
+        {
+            private ManualResetValueTaskSourceCore<T> _core;
+
+            T IValueTaskSource<T>.GetResult(short token) => _core.GetResult(token);
+            void IValueTaskSource.GetResult(short token) => _core.GetResult(token);
+            ValueTaskSourceStatus IValueTaskSource<T>.GetStatus(short token) => _core.GetStatus(token);
+            ValueTaskSourceStatus IValueTaskSource.GetStatus(short token) => _core.GetStatus(token);
+            void IValueTaskSource<T>.OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) => _core.OnCompleted(continuation, state, token, flags);
+            void IValueTaskSource.OnCompleted(Action<object?> continuation, object? state, short token, ValueTaskSourceOnCompletedFlags flags) => _core.OnCompleted(continuation, state, token, flags);
+            public void Reset() => _core.Reset();
+            public short Token => _core.Version;
+            public void SetResult(T result) => _core.SetResult(result);
+        }
+
+        [Fact]
+        public async Task AsyncValueTaskBackedByIValueTaskSourceIsAwaitedProperly()
+        {
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncValueTaskSource))).ToArrayAsync();
+
+            Assert.True(AsyncValueTaskSource.WasCalled);
+            Assert.Empty(validationErrors);
+        }
+
+        public class AsyncValueTaskSource
+        {
+            private readonly ValueTaskSource<bool> valueTaskSource = new();
+
+            public static bool WasCalled;
+
+            [GlobalSetup]
+            public ValueTask GlobalSetup()
+            {
+                valueTaskSource.Reset();
+                Task.Delay(1).ContinueWith(_ =>
+                {
+                    WasCalled = true;
+                    valueTaskSource.SetResult(true);
+                });
+                return new ValueTask(valueTaskSource, valueTaskSource.Token);
+            }
+
+            [Benchmark]
+            public void NonThrowing() { }
+        }
+
+        [Fact]
+        public async Task AsyncGenericValueTaskBackedByIValueTaskSourceIsAwaitedProperly()
+        {
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(AsyncGenericValueTaskSource))).ToArrayAsync();
+
+            Assert.True(AsyncGenericValueTaskSource.WasCalled);
+            Assert.Empty(validationErrors);
+        }
+
+        public class AsyncGenericValueTaskSource
+        {
+            private readonly ValueTaskSource<int> valueTaskSource = new();
+
+            public static bool WasCalled;
+
+            [GlobalSetup]
+            public ValueTask<int> GlobalSetup()
+            {
+                valueTaskSource.Reset();
+                Task.Delay(1).ContinueWith(_ =>
+                {
+                    WasCalled = true;
+                    valueTaskSource.SetResult(1);
+                });
+                return new ValueTask<int>(valueTaskSource, valueTaskSource.Token);
+            }
+
+            [Benchmark]
+            public void NonThrowing() { }
+        }
+
+        [Fact]
+        public async Task IteratorBodyExceptionsInAsyncEnumerableBenchmarksAreDiscovered()
+        {
+            // Without draining, calling the iterator method just allocates the state machine and the
+            // body never runs — so the throw inside MoveNextAsync would silently pass validation.
+            var validationErrors = await ExecutionValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(ThrowingAsyncEnumerableBenchmark)))
+                .ToArrayAsync();
+
+            Assert.NotEmpty(validationErrors);
+            Assert.Contains(validationErrors, error => error.Message.Contains("This iterator throws"));
+        }
+
+        [Fact]
+        public async Task ARefStructCurrentIsNotValidatedAndNotRefused()
+        {
+            var validationErrors = await ExecutionValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(RefStructCurrentBenchmark)))
+                .ToArrayAsync();
+
+            // Says why it was skipped, and does not refuse it: IsCritical is what decides that, and FailOnError
+            // would otherwise turn the explanation into a refusal.
+            var skipped = Assert.Single(validationErrors);
+            Assert.Contains("yields by-ref-like elements", skipped.Message);
+            Assert.False(skipped.IsCritical);
+        }
+
+        [Fact]
+        public async Task ARefStructParameterIsNotValidatedAndNotRefused()
+        {
+            var validationErrors = await ExecutionValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(RefStructParameterBenchmark)))
+                .ToArrayAsync();
+
+            var skipped = Assert.Single(validationErrors);
+            Assert.Contains("by-ref-like parameter", skipped.Message);
+            Assert.False(skipped.IsCritical);
+        }
+
+        // The generated code passes a by-ref-like argument natively and runs; reflection cannot box one into the
+        // args array, so the validator can only skip - it must not refuse.
+        public class RefStructParameterBenchmark
+        {
+            public static IEnumerable<object> Values() { yield return new byte[] { 1, 2, 3 }; }
+
+            [Benchmark]
+            [ArgumentsSource(nameof(Values))]
+            public int Run(ReadOnlySpan<byte> bytes) => bytes.Length;
+        }
+
+        [Fact]
+        public async Task ARefStructReturnIsNotValidatedAndNotRefused()
+        {
+            var validationErrors = await ExecutionValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(RefStructReturnBenchmark)))
+                .ToArrayAsync();
+
+            var skipped = Assert.Single(validationErrors);
+            Assert.Contains("returns by-ref-like value", skipped.Message);
+            Assert.False(skipped.IsCritical);
+        }
+
+        // Reflection cannot box a ref struct to hand it back, so the method cannot even be invoked - the guard has
+        // to come before the call, not around the result.
+        public class RefStructReturnBenchmark
+        {
+            [Benchmark]
+            public ReadOnlySpan<byte> Run() => default;
+        }
+
+        // Both validators read Current through reflection, which cannot hand back a ref struct - so neither can
+        // validate this benchmark, and neither may refuse to run it. Its generated code reads Current strongly
+        // typed and works.
+        public class RefStructCurrentBenchmark
+        {
+            [Benchmark]
+            public SpanEnumerable Enumerating() => default;
+
+            public readonly struct SpanEnumerable
+            {
+                public SpanEnumerator GetAsyncEnumerator(CancellationToken cancellationToken = default) => new();
+            }
+
+            public struct SpanEnumerator
+            {
+                private int index;
+
+                public ReadOnlySpan<byte> Current => default;
+
+                public ValueTask<bool> MoveNextAsync() => new(index++ < 2);
+            }
+        }
+
+        public class ThrowingAsyncEnumerableBenchmark
+        {
+            [Benchmark]
+            public async IAsyncEnumerable<int> Throwing()
+            {
+                yield return 1;
+                await Task.Yield();
+                throw new Exception("This iterator throws");
+            }
+        }
+
+        // An argument is passed to the benchmark method, so there is no member of that name to assign it to.
+        // Reporting one is a validation error against a benchmark that runs perfectly well.
+        [Fact]
+        public async Task ArgumentsAreNotMistakenForMembersToAssign()
+        {
+            var validationErrors = await ExecutionValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(WithArguments))).ToArrayAsync();
+
+            Assert.Empty(validationErrors);
+        }
+
+        public class WithArguments
+        {
+            [Params(2)]
+            public int Parameter { get; set; }
+
+            [Benchmark]
+            [Arguments(1)]
+            public int Bench(int value) => value + Parameter;
         }
     }
 }

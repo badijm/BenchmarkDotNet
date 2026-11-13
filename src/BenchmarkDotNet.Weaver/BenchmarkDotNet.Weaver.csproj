@@ -1,0 +1,50 @@
+<!--
+If any changes are made to this project, increment the WeaverVersionSuffix in the common.props file,
+then run `build.cmd pack-weaver`.
+-->
+
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\build\common.props" />
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0</TargetFrameworks>
+    <VersionSuffix>$(VersionSuffix)$(WeaverVersionSuffix)</VersionSuffix>
+    <OutputPath>$(MSBuildThisFileDirectory)bin\$(Configuration)</OutputPath>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoWarn>$(NoWarn);NU5100;NU5127;NU5128</NoWarn>
+    <!-- AsmResolver is not signed. -->
+    <SignAssembly>false</SignAssembly>
+    <DelaySign>false</DelaySign>
+    <!-- Fix error NU5017: Cannot create a package that has no dependencies nor content. -->
+    <IsPackable Condition="'$(IsFullPack)' == 'true'">false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AsmResolver.DotNet" Version="6.0.1" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Framework" Version="18.11.0" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="18.11.0" PrivateAssets="all" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Include .targets file and all DLLs in the output directory in the NuGet package -->
+    <Content Include="$(MSBuildThisFileDirectory)buildTransitive\**\*.targets" Pack="true" PackagePath="buildTransitive" />
+    <Content Include="$(OutputPath)**\*.dll" Pack="true" PackagePath="tasks/$(TargetFramework)" />
+    <None Remove="packages\**" />
+  </ItemGroup>
+
+  <!-- Settings for PolySharp -->
+  <PropertyGroup>
+    <PolySharpIncludeGeneratedTypes>
+      System.Runtime.CompilerServices.CompilerFeatureRequiredAttribute,
+      System.Runtime.CompilerServices.RequiredMemberAttribute
+    </PolySharpIncludeGeneratedTypes>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="PolySharp" Version="1.16.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <Import Project="..\..\build\common.targets" />
+</Project>

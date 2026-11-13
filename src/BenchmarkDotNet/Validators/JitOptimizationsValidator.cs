@@ -1,8 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using BenchmarkDotNet.Extensions;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Validators
 {
@@ -15,11 +12,21 @@ namespace BenchmarkDotNet.Validators
 
         public bool TreatsWarningsAsErrors { get; }
 
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters)
+        public async IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters)
         {
             foreach (var group in validationParameters.Benchmarks.GroupBy(benchmark => benchmark.Descriptor.Type.GetTypeInfo().Assembly))
             {
-                foreach (var referencedAssemblyName in group.Key.GetReferencedAssemblies())
+                // GetReferencedAssemblies() is not supported in NativeAOT currently.
+                AssemblyName[] referencedAssemblies;
+                try
+                {
+                    referencedAssemblies = group.Key.GetReferencedAssemblies();
+                }
+                catch (NotSupportedException)
+                {
+                    referencedAssemblies = [];
+                }
+                foreach (var referencedAssemblyName in referencedAssemblies)
                 {
                     var referencedAssembly = Assembly.Load(referencedAssemblyName);
 

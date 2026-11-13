@@ -1,15 +1,18 @@
-﻿using System.Diagnostics.CodeAnalysis;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Characteristics;
 using BenchmarkDotNet.Engines;
+using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.Models;
 using Perfolizer.Horology;
+using System.Diagnostics.CodeAnalysis;
 
 namespace BenchmarkDotNet.Jobs
 {
     [SuppressMessage("ReSharper", "UnusedMember.Global")]
     public sealed class RunMode : JobMode<RunMode>
     {
-        public static readonly Characteristic<RunStrategy> RunStrategyCharacteristic = Characteristic.Create<RunMode, RunStrategy>(nameof(RunStrategy), RunStrategy.Throughput);
+        public static readonly Characteristic<RunStrategy> RunStrategyCharacteristic =
+            Characteristic.Create<RunMode, RunStrategy>(nameof(RunStrategy), RunStrategy.Throughput);
 
         public static readonly Characteristic<int> LaunchCountCharacteristic = CreateCharacteristic<int>(nameof(LaunchCount));
         public static readonly Characteristic<long> InvocationCountCharacteristic = CreateCharacteristic<long>(nameof(InvocationCount));
@@ -22,13 +25,14 @@ namespace BenchmarkDotNet.Jobs
         public static readonly Characteristic<int> MinWarmupIterationCountCharacteristic = CreateCharacteristic<int>(nameof(MinWarmupIterationCount));
         public static readonly Characteristic<int> MaxWarmupIterationCountCharacteristic = CreateCharacteristic<int>(nameof(MaxWarmupIterationCount));
         public static readonly Characteristic<bool> MemoryRandomizationCharacteristic = CreateCharacteristic<bool>(nameof(MemoryRandomization));
+        public static readonly Characteristic<bool> ConsumeTasksSynchronouslyCharacteristic = CreateCharacteristic<bool>(nameof(ConsumeTasksSynchronously));
+        public static readonly Characteristic<JitTieringMode> JitTieringModeCharacteristic = CreateCharacteristic<JitTieringMode>(nameof(JitTieringMode));
 
         public static readonly RunMode Dry = new RunMode(nameof(Dry))
         {
             LaunchCount = 1,
-            WarmupCount = 1,
             IterationCount = 1,
-            RunStrategy = RunStrategy.ColdStart,
+            RunStrategy = RunStrategy.ColdStart, // WarmupStage is not invoked when using RunStrategy.ColdStart.
             UnrollFactor = 1
         }.Freeze();
 
@@ -61,13 +65,9 @@ namespace BenchmarkDotNet.Jobs
         }.Freeze();
 
 
-        public RunMode() : this(null)
-        {
-        }
+        public RunMode() : this("") { }
 
-        private RunMode(string id) : base(id)
-        {
-        }
+        private RunMode(string id) : base(id) { }
 
         /// <summary>
         /// Available values: Throughput and ColdStart.
@@ -191,5 +191,48 @@ namespace BenchmarkDotNet.Jobs
             get => MemoryRandomizationCharacteristic[this];
             set => MemoryRandomizationCharacteristic[this] = value;
         }
+
+        /// <summary>
+        /// Specifies whether (Value)Task-returning benchmarks should be consumed synchronously.
+        /// False by default.
+        /// </summary>
+        /// <remarks>
+        /// Intended to make async benchmark results comparable to historical results obtained from older BenchmarkDotNet versions. Recommended to leave false for new benchmarks.
+        /// </remarks>
+        public bool ConsumeTasksSynchronously
+        {
+            get => ConsumeTasksSynchronouslyCharacteristic[this];
+            set => ConsumeTasksSynchronouslyCharacteristic[this] = value;
+        }
+
+        /// <summary>
+        /// Controls the behavior of the JIT stage when tiering is enabled.
+        /// <list type="bullet">
+        /// <item><see cref="JitTieringMode.Auto"/> (default): Promote through every tier for short-running benchmarks only.</item>
+        /// <item><see cref="JitTieringMode.Force"/>: Always promote through every tier, regardless of invocation time.</item>
+        /// <item><see cref="JitTieringMode.Skip"/>: Skip tier promotion entirely.</item>
+        /// </list>
+        /// </summary>
+        public JitTieringMode JitTieringMode
+        {
+            get => JitTieringModeCharacteristic[this];
+            set => JitTieringModeCharacteristic[this] = value;
+        }
+
+        internal BdnExecution ToPerfonar() => new()
+        {
+            LaunchCount = HasValue(LaunchCountCharacteristic) ? LaunchCount : null,
+            WarmupCount = HasValue(WarmupCountCharacteristic) ? WarmupCount : null,
+            IterationCount = HasValue(IterationCountCharacteristic) ? IterationCount : null,
+            IterationTimeMs = HasValue(IterationTimeCharacteristic) ? IterationTime.ToMilliseconds().RoundToLong() : null,
+            InvocationCount = HasValue(InvocationCountCharacteristic) ? InvocationCount : null,
+            UnrollFactor = HasValue(UnrollFactorCharacteristic) ? UnrollFactor : null,
+            MinIterationCount = HasValue(MinIterationCountCharacteristic) ? MinIterationCount : null,
+            MaxIterationCount = HasValue(MaxIterationCountCharacteristic) ? MaxIterationCount : null,
+            MinWarmupIterationCount = HasValue(MinWarmupIterationCountCharacteristic) ? MinWarmupIterationCount : null,
+            MaxWarmupIterationCount = HasValue(MaxWarmupIterationCountCharacteristic) ? MaxWarmupIterationCount : null,
+            MemoryRandomization = HasValue(MemoryRandomizationCharacteristic) ? MemoryRandomization : null,
+            RunStrategy = HasValue(RunStrategyCharacteristic) ? RunStrategy : null,
+        };
     }
 }

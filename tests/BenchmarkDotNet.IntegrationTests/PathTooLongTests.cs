@@ -1,11 +1,15 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Tests.XUnit;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
     public class PathTooLongTests : BenchmarkTestExecutor
     {
-        [FactWindowsOnly("Testing Windows long path limitation")]
+        public PathTooLongTests(ITestOutputHelper output) : base(output)
+        {
+        }
+
+        [FactEnvSpecific("Testing Windows long path limitation", EnvRequirement.WindowsOnly)]
         public void PathTooLongTest() =>
             CanExecute<
                 VeryLongName012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789>();

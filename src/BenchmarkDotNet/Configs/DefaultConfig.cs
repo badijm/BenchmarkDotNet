@@ -1,30 +1,38 @@
-using System;
-using System.Collections.Generic;
-using System.Globalization;
-using System.IO;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Diagnosers;
+using BenchmarkDotNet.EventProcessors;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Exporters.Csv;
 using BenchmarkDotNet.Filters;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Order;
-using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
+using System.Globalization;
 
 namespace BenchmarkDotNet.Configs
 {
     public class DefaultConfig : IConfig
     {
-        public static readonly IConfig Instance = new DefaultConfig();
-        private readonly static Conclusion[] emptyConclusion = Array.Empty<Conclusion>();
+        public static IConfig Instance => customDefaultConfig ?? Default;
+
+        public static readonly IConfig Default = new DefaultConfig();
+
+        private readonly static Conclusion[] emptyConclusion = [];
+
+        private static IConfig? customDefaultConfig = null;
 
         private DefaultConfig()
         {
+        }
+
+        public static void SetCustomConfig(ImmutableConfig? config)
+        {
+            customDefaultConfig = config;
         }
 
         public IEnumerable<IColumnProvider> GetColumnProviders() => DefaultColumnProviders.Instance;
@@ -41,7 +49,7 @@ namespace BenchmarkDotNet.Configs
         public IEnumerable<ILogger> GetLoggers()
         {
             if (LinqPadLogger.IsAvailable)
-                yield return LinqPadLogger.Instance;
+                yield return LinqPadLogger.Instance!;
             else
                 yield return ConsoleLogger.Default;
         }
@@ -62,6 +70,7 @@ namespace BenchmarkDotNet.Configs
         {
             yield return BaselineValidator.FailOnError;
             yield return SetupCleanupValidator.FailOnError;
+            yield return AwaitableAsyncEnumerableAmbiguityValidator.DontFailOnError;
 #if !DEBUG
             yield return JitOptimizationsValidator.FailOnError;
 #endif
@@ -70,14 +79,17 @@ namespace BenchmarkDotNet.Configs
             yield return DeferredExecutionValidator.FailOnError;
             yield return ParamsAllValuesValidator.FailOnError;
             yield return ParamsValidator.FailOnError;
+            yield return RequiredMemberValidator.FailOnError;
+            yield return SourceReturnTypeValidator.FailOnError;
+            yield return BenchmarkCancellationValidator.FailOnError;
         }
 
-        public IOrderer Orderer => null;
+        public IOrderer? Orderer => null;
         public ICategoryDiscoverer? CategoryDiscoverer => null;
 
         public ConfigUnionRule UnionRule => ConfigUnionRule.Union;
 
-        public CultureInfo CultureInfo => null;
+        public CultureInfo? CultureInfo => null;
 
         public ConfigOptions Options => ConfigOptions.Default;
 
@@ -85,29 +97,43 @@ namespace BenchmarkDotNet.Configs
 
         public TimeSpan BuildTimeout => TimeSpan.FromSeconds(120);
 
+        public WakeLockType WakeLock => WakeLockType.System;
+
         public string ArtifactsPath
         {
             get
             {
-                var root = RuntimeInformation.IsAndroid() ?
-                    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) :
-                    Directory.GetCurrentDirectory();
+                string root;
+                if (OsDetector.IsMobile())
+                {
+                    // On mobile platforms (Android, iOS, tvOS), use a writable location
+                    // because the app bundle and current directory are read-only due to sandboxing
+                    root = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                }
+                else
+                {
+                    root = Directory.GetCurrentDirectory();
+                }
                 return Path.Combine(root, "BenchmarkDotNet.Artifacts");
             }
         }
 
+        public string? Title => null;
+
         public IReadOnlyList<Conclusion> ConfigAnalysisConclusion => emptyConclusion;
 
-        public IEnumerable<Job> GetJobs() => Array.Empty<Job>();
+        public IEnumerable<Job> GetJobs() => [];
 
-        public IEnumerable<BenchmarkLogicalGroupRule> GetLogicalGroupRules() => Array.Empty<BenchmarkLogicalGroupRule>();
+        public IEnumerable<BenchmarkLogicalGroupRule> GetLogicalGroupRules() => [];
 
-        public IEnumerable<IDiagnoser> GetDiagnosers() => Array.Empty<IDiagnoser>();
+        public IEnumerable<IDiagnoser> GetDiagnosers() => [];
 
-        public IEnumerable<HardwareCounter> GetHardwareCounters() => Array.Empty<HardwareCounter>();
+        public IEnumerable<HardwareCounter> GetHardwareCounters() => [];
 
-        public IEnumerable<IFilter> GetFilters() => Array.Empty<IFilter>();
+        public IEnumerable<IFilter> GetFilters() => [];
 
-        public IEnumerable<IColumnHidingRule> GetColumnHidingRules() => Array.Empty<IColumnHidingRule>();
+        public IEnumerable<EventProcessor> GetEventProcessors() => [];
+
+        public IEnumerable<IColumnHidingRule> GetColumnHidingRules() => [];
     }
 }

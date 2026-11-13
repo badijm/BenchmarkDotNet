@@ -1,5 +1,4 @@
-﻿using BenchmarkDotNet.Attributes;
-using System.Threading;
+using BenchmarkDotNet.Attributes;
 
 namespace BenchmarkDotNet.Samples
 {
@@ -11,7 +10,7 @@ namespace BenchmarkDotNet.Samples
         {
             ManualResetEvent done = new ManualResetEvent(initialState: false);
 
-            ThreadPool.QueueUserWorkItem(m => (m as ManualResetEvent).Set(), done);
+            ThreadPool.QueueUserWorkItem(m => (m as ManualResetEvent)?.Set(), done);
 
             done.WaitOne();
         }

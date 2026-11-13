@@ -1,4 +1,4 @@
-﻿namespace BenchmarkDotNet.Engines
+namespace BenchmarkDotNet.Engines
 {
     public enum HostSignal
     {
@@ -6,6 +6,11 @@
         /// before we start the benchmarking process
         /// </summary>
         BeforeProcessStart,
+
+        /// <summary>
+        /// right after we start the benchmarking process
+        /// </summary>
+        AfterProcessStart,
 
         /// <summary>
         /// before jitting, warmup
@@ -21,6 +26,16 @@
         /// after main run, but before global Cleanup
         /// </summary>
         AfterActualRun,
+
+        /// <summary>
+        /// after actual run, after extra IterationSetup, before extra iteration
+        /// </summary>
+        BeforeExtraIteration,
+
+        /// <summary>
+        /// after extra iteration, before extra IterationCleanup
+        /// </summary>
+        AfterExtraIteration,
 
         /// <summary>
         /// after all (the last thing the benchmarking engine does is to fire this signal)

@@ -1,17 +1,14 @@
-﻿using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Toolchains.Results;
 
-namespace BenchmarkDotNet.Toolchains.InProcess.NoEmit
+namespace BenchmarkDotNet.Toolchains.InProcess.NoEmit;
+
+internal class InProcessNoEmitBuilder : IBuilder
 {
-    /// <summary>
-    /// In process (no emit) toolchain builder
-    /// </summary>
-    /// <seealso cref="BenchmarkDotNet.Toolchains.IBuilder" />
-    public class InProcessNoEmitBuilder : IBuilder
-    {
-        /// <summary>always returns success</summary>
-        public BuildResult Build(GenerateResult generateResult, BuildPartition buildPartition, ILogger logger)
-            => BuildResult.Success(generateResult);
-    }
+    // It does nothing, there is no point to run it concurrently.
+    public bool GetSupportsConcurrency(BuildPartition buildPartition) => false;
+
+    public ValueTask<BuildResult> BuildAsync(BuildPartition buildPartition, ILogger logger, string rootArtifactsFolderPath, CancellationToken cancellationToken)
+        => new(BuildResult.Success(ArtifactsPaths.Empty));
 }

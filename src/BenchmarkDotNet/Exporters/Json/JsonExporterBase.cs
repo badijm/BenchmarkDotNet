@@ -1,10 +1,9 @@
-﻿using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Environments;
-using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Reports;
+using BenchmarkDotNet.Serialization;
+using Perfolizer.Helpers;
 using Perfolizer.Horology;
-using JsonSerializer = SimpleJson.SimpleJson;
 
 namespace BenchmarkDotNet.Exporters.Json
 {
@@ -21,10 +20,11 @@ namespace BenchmarkDotNet.Exporters.Json
             ExcludeMeasurements = excludeMeasurements;
         }
 
-        public override void ExportToLog(Summary summary, ILogger logger)
+        public override async ValueTask ExportAsync(Summary summary, CancelableStreamWriter writer, CancellationToken cancellationToken)
         {
-            JsonSerializer.CurrentJsonSerializerStrategy.Indent = IndentJson;
-            logger.WriteLine(JsonSerializer.SerializeObject(GetDataToSerialize(summary)));
+            var dataToSerialize = GetDataToSerialize(summary);
+            var json = BdnSimpleJsonSerializer.Serialize(dataToSerialize, IndentJson);
+            await writer.WriteLineAsync(json, cancellationToken).ConfigureAwait(false);
         }
 
         protected virtual IReadOnlyDictionary<string, object> GetDataToSerialize(Summary summary)
@@ -39,19 +39,19 @@ namespace BenchmarkDotNet.Exporters.Json
             };
         }
 
-        protected virtual IReadOnlyDictionary<string, object> GetDataToSerialize(HostEnvironmentInfo environmentInfo)
+        protected virtual IReadOnlyDictionary<string, object?> GetDataToSerialize(HostEnvironmentInfo environmentInfo)
         {
             // We construct HostEnvironmentInfo manually, so that we can have the HardwareTimerKind enum as text, rather than an integer
             // SimpleJson serializer doesn't seem to have an enum String/Value option (to-be-fair, it is meant to be "Simple")
-            return new Dictionary<string, object>
+            return new Dictionary<string, object?>
             {
                 { nameof(HostEnvironmentInfo.BenchmarkDotNetCaption), HostEnvironmentInfo.BenchmarkDotNetCaption },
                 { nameof(environmentInfo.BenchmarkDotNetVersion), environmentInfo.BenchmarkDotNetVersion },
-                { "OsVersion", environmentInfo.OsVersion.Value },
-                { "ProcessorName", ProcessorBrandStringHelper.Prettify(environmentInfo.CpuInfo.Value) },
-                { "PhysicalProcessorCount", environmentInfo.CpuInfo.Value?.PhysicalProcessorCount },
-                { "PhysicalCoreCount", environmentInfo.CpuInfo.Value?.PhysicalCoreCount },
-                { "LogicalCoreCount", environmentInfo.CpuInfo.Value?.LogicalCoreCount },
+                { "OsVersion", environmentInfo.Os.Value.ToBrandString() },
+                { "ProcessorName", environmentInfo.Cpu.Value.ToShortBrandName() },
+                { "PhysicalProcessorCount", environmentInfo.Cpu.Value?.PhysicalProcessorCount },
+                { "PhysicalCoreCount", environmentInfo.Cpu.Value?.PhysicalCoreCount },
+                { "LogicalCoreCount", environmentInfo.Cpu.Value?.LogicalCoreCount },
                 { nameof(environmentInfo.RuntimeVersion), environmentInfo.RuntimeVersion },
                 { nameof(environmentInfo.Architecture), environmentInfo.Architecture },
                 { nameof(environmentInfo.HasAttachedDebugger), environmentInfo.HasAttachedDebugger },
@@ -63,9 +63,9 @@ namespace BenchmarkDotNet.Exporters.Json
             };
         }
 
-        protected virtual IReadOnlyDictionary<string, object> GetDataToSerialize(BenchmarkReport report)
+        protected virtual IReadOnlyDictionary<string, object?> GetDataToSerialize(BenchmarkReport report)
         {
-            var benchmark = new Dictionary<string, object>
+            var benchmark = new Dictionary<string, object?>
             {
                 // We don't need Benchmark.ShortInfo, that info is available via Benchmark.Parameters below
                 { "DisplayInfo", report.BenchmarkCase.DisplayInfo },
@@ -83,40 +83,40 @@ namespace BenchmarkDotNet.Exporters.Json
                 { "Statistics", report.ResultStatistics }
             };
 
-                // We show MemoryDiagnoser's results only if it is being used
-                if (report.BenchmarkCase.Config.HasMemoryDiagnoser())
+            // We show MemoryDiagnoser's results only if it is being used
+            if (report.BenchmarkCase.Config.HasMemoryDiagnoser())
+            {
+                benchmark.Add("Memory", new
                 {
-                    benchmark.Add("Memory", new
-                    {
-                        report.GcStats.Gen0Collections,
-                        report.GcStats.Gen1Collections,
-                        report.GcStats.Gen2Collections,
-                        report.GcStats.TotalOperations,
-                        BytesAllocatedPerOperation = report.GcStats.GetBytesAllocatedPerOperation(report.BenchmarkCase)
-                    });
-                }
+                    report.GcStats.Gen0Collections,
+                    report.GcStats.Gen1Collections,
+                    report.GcStats.Gen2Collections,
+                    report.GcStats.TotalOperations,
+                    BytesAllocatedPerOperation = report.GcStats.GetBytesAllocatedPerOperation(report.BenchmarkCase)
+                });
+            }
 
-                if (ExcludeMeasurements == false)
+            if (ExcludeMeasurements == false)
+            {
+                // We construct Measurements manually, so that we can have the IterationMode enum as text, rather than an integer
+                benchmark.Add("Measurements",
+                    report.AllMeasurements.Select(m => new
+                    {
+                        IterationMode = m.IterationMode.ToString(),
+                        IterationStage = m.IterationStage.ToString(),
+                        m.LaunchIndex,
+                        m.IterationIndex,
+                        m.Operations,
+                        m.Nanoseconds
+                    }));
+
+                if (report.Metrics.Any())
                 {
-                    // We construct Measurements manually, so that we can have the IterationMode enum as text, rather than an integer
-                    benchmark.Add("Measurements",
-                        report.AllMeasurements.Select(m => new
-                        {
-                            IterationMode = m.IterationMode.ToString(),
-                            IterationStage = m.IterationStage.ToString(),
-                            m.LaunchIndex,
-                            m.IterationIndex,
-                            m.Operations,
-                            m.Nanoseconds
-                        }));
-
-                    if (report.Metrics.Any())
-                    {
-                        benchmark.Add("Metrics", report.Metrics.Values);
-                    }
+                    benchmark.Add("Metrics", report.Metrics.Values);
                 }
+            }
 
-                return benchmark;
+            return benchmark;
         }
     }
 }

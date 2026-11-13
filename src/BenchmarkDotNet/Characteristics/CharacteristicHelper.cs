@@ -1,10 +1,7 @@
-﻿using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Linq;
-using System.Reflection;
 using JetBrains.Annotations;
+using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Characteristics
 {
@@ -17,7 +14,7 @@ namespace BenchmarkDotNet.Characteristics
         private static bool IsCharacteristicSubclass(Type type) =>
             type.GetTypeInfo().IsSubclassOf(typeof(Characteristic));
 
-        private static Characteristic AssertHasValue(MemberInfo member, Characteristic value)
+        private static Characteristic AssertHasValue(MemberInfo member, Characteristic? value)
         {
             if (member?.DeclaringType == null)
                 throw new NullReferenceException($"{nameof(member.DeclaringType)}");
@@ -32,12 +29,13 @@ namespace BenchmarkDotNet.Characteristics
         #endregion
 
         #region Type characteristics
-        private static readonly IReadOnlyList<Characteristic> EmptyCharacteristics = Array.Empty<Characteristic>();
+        private static readonly IReadOnlyList<Characteristic> EmptyCharacteristics = [];
 
         private static readonly ConcurrentDictionary<Type, IReadOnlyList<Characteristic>> ThisTypeCharacteristics =
             new ConcurrentDictionary<Type, IReadOnlyList<Characteristic>>();
 
-        [PublicAPI] public static IReadOnlyList<Characteristic> GetThisTypeCharacteristics(this CharacteristicObject obj) =>
+        [PublicAPI]
+        public static IReadOnlyList<Characteristic> GetThisTypeCharacteristics(this CharacteristicObject obj) =>
             GetThisTypeCharacteristics(obj.GetType());
 
         public static IReadOnlyList<Characteristic> GetThisTypeCharacteristics(
@@ -54,12 +52,12 @@ namespace BenchmarkDotNet.Characteristics
             var fieldValues = characteristicObjectType.GetTypeInfo()
                 .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy | BindingFlags.Static)
                 .Where(f => IsCharacteristicSubclass(f.FieldType))
-                .Select(f => AssertHasValue(f, (Characteristic)f.GetValue(null)));
+                .Select(f => AssertHasValue(f, (Characteristic?) f.GetValue(null)));
 
             var propertyValues = characteristicObjectType.GetTypeInfo()
                 .GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.FlattenHierarchy | BindingFlags.Static)
                 .Where(p => p.GetMethod != null && IsCharacteristicSubclass(p.PropertyType))
-                .Select(p => AssertHasValue(p, (Characteristic)p.GetValue(null)));
+                .Select(p => AssertHasValue(p, (Characteristic?) p.GetValue(null)));
 
             // DONTTOUCH: DO NOT change the order of characteristic as it may break logic of some operations.
             return fieldValues
@@ -89,7 +87,7 @@ namespace BenchmarkDotNet.Characteristics
         {
             var result = new List<Characteristic>();
 
-            FillAllCharacteristicsCore(characteristicObjectType, result, new HashSet<Characteristic>());
+            FillAllCharacteristicsCore(characteristicObjectType, result, []);
 
             return result.ToArray();
         }

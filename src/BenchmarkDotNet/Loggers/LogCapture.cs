@@ -1,5 +1,3 @@
-﻿using System.Collections.Generic;
-
 namespace BenchmarkDotNet.Loggers
 {
     public class LogCapture : ILogger

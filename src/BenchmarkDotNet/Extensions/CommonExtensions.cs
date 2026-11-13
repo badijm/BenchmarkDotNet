@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Reports;
+using System.Diagnostics.CodeAnalysis;
 
 namespace BenchmarkDotNet.Extensions
 {
@@ -20,11 +18,15 @@ namespace BenchmarkDotNet.Extensions
             switch (column.UnitType)
             {
                 case UnitType.CodeSize:
-                    return $"{column.ColumnName} [{style.CodeSizeUnit.Name}]";
+                    return $"{column.ColumnName} [{style.CodeSizeUnit.GetAbbreviation()}]";
                 case UnitType.Size:
-                    return $"{column.ColumnName} [{style.SizeUnit.Name}]";
+                    return style.SizeUnit != null
+                        ? $"{column.ColumnName} [{style.SizeUnit.GetAbbreviation()}]"
+                        : $"{column.ColumnName}";
                 case UnitType.Time:
-                    return $"{column.ColumnName} [{style.TimeUnit.Name}]";
+                    return style.TimeUnit != null
+                        ? $"{column.ColumnName} [{style.TimeUnit.GetAbbreviation()}]"
+                        : $"{column.ColumnName}";
                 case UnitType.Dimensionless:
                     return column.ColumnName;
                 default:
@@ -32,9 +34,11 @@ namespace BenchmarkDotNet.Extensions
             }
         }
 
-        public static bool IsNullOrEmpty<T>(this IReadOnlyCollection<T> value) => value == null || value.Count == 0;
+        public static bool IsNullOrEmpty<T>([NotNullWhen(false)] this IReadOnlyCollection<T>? value) => value == null || value.Count == 0;
         public static bool IsEmpty<T>(this IReadOnlyCollection<T> value) => value.Count == 0;
         public static bool IsEmpty<T>(this IEnumerable<T> value) => !value.Any();
+
+        public static IEnumerable<T> WhereNotNull<T>(this IEnumerable<T?> values) => values.Where(value => value != null).Cast<T>();
 
         public static void AddRange<T>(this HashSet<T> hashSet, IEnumerable<T> collection)
         {
@@ -42,8 +46,18 @@ namespace BenchmarkDotNet.Extensions
                 hashSet.Add(item);
         }
 
+        public static void AddRangeDistinct<T>(this List<T> list, IEnumerable<T> items, IEqualityComparer<T>? comparer = null)
+        {
+            var hashSet = new HashSet<T>(list, comparer);
+            foreach (var item in items)
+            {
+                if (hashSet.Add(item))
+                    list.Add(item);
+            }
+        }
+
 #if NETSTANDARD2_0
-        public static TValue GetValueOrDefault<TKey, TValue>(this IDictionary<TKey, TValue> dictionary, TKey key)
+        public static TValue? GetValueOrDefault<TKey, TValue>(this IDictionary<TKey, TValue> dictionary, TKey key)
             => dictionary.TryGetValue(key, out var value) ? value : default;
 #endif
 
@@ -97,7 +111,9 @@ namespace BenchmarkDotNet.Extensions
 
         internal static string EnsureFolderExists(this string filePath)
         {
-            string directoryPath = Path.GetDirectoryName(filePath);
+            string? directoryPath = Path.GetDirectoryName(filePath);
+            if (directoryPath == null)
+                throw new ArgumentException($"Can't get directory path from '{filePath}'");
 
             if (!Directory.Exists(directoryPath))
                 Directory.CreateDirectory(directoryPath);
@@ -105,7 +121,7 @@ namespace BenchmarkDotNet.Extensions
             return filePath;
         }
 
-        internal static bool IsNotNullButDoesNotExist(this FileSystemInfo fileInfo)
+        internal static bool IsNotNullButDoesNotExist(this FileSystemInfo? fileInfo)
             => fileInfo != null && !fileInfo.Exists;
     }
 }

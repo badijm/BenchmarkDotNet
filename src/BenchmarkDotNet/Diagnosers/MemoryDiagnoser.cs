@@ -1,5 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Engines;
@@ -23,25 +21,25 @@ namespace BenchmarkDotNet.Diagnosers
 
         public RunMode GetRunMode(BenchmarkCase benchmarkCase) => RunMode.NoOverhead;
 
-        public IEnumerable<string> Ids => new[] { DiagnoserId };
-        public IEnumerable<IExporter> Exporters => Array.Empty<IExporter>();
-        public IEnumerable<IAnalyser> Analysers => Array.Empty<IAnalyser>();
+        public IEnumerable<string> Ids => [DiagnoserId];
+        public IEnumerable<IExporter> Exporters => [];
+        public IEnumerable<IAnalyser> Analysers => [];
         public void DisplayResults(ILogger logger) { }
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters) => Array.Empty<ValidationError>();
+        public IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters) => AsyncEnumerable.Empty<ValidationError>();
 
         // the action takes places in other process, and the values are gathered by Engine
-        public void Handle(HostSignal signal, DiagnoserActionParameters parameters) { }
+        public ValueTask HandleAsync(HostSignal signal, DiagnoserActionParameters parameters, CancellationToken cancellationToken) => new();
 
         public IEnumerable<Metric> ProcessResults(DiagnoserResults diagnoserResults)
         {
-            if (diagnoserResults.GcStats.Gen0Collections > 0 && Config.DisplayGenColumns)
-                yield return new Metric(GarbageCollectionsMetricDescriptor.Gen0, diagnoserResults.GcStats.Gen0Collections / (double)diagnoserResults.GcStats.TotalOperations * 1000);
-            if (diagnoserResults.GcStats.Gen1Collections > 0 && Config.DisplayGenColumns)
-                yield return new Metric(GarbageCollectionsMetricDescriptor.Gen1, diagnoserResults.GcStats.Gen1Collections / (double)diagnoserResults.GcStats.TotalOperations * 1000);
-            if (diagnoserResults.GcStats.Gen2Collections > 0 && Config.DisplayGenColumns)
-                yield return new Metric(GarbageCollectionsMetricDescriptor.Gen2, diagnoserResults.GcStats.Gen2Collections / (double)diagnoserResults.GcStats.TotalOperations * 1000);
+            if (Config.DisplayGenColumns)
+            {
+                yield return new Metric(GarbageCollectionsMetricDescriptor.Gen0, diagnoserResults.GcStats.Gen0Collections / (double) diagnoserResults.GcStats.TotalOperations * 1000);
+                yield return new Metric(GarbageCollectionsMetricDescriptor.Gen1, diagnoserResults.GcStats.Gen1Collections / (double) diagnoserResults.GcStats.TotalOperations * 1000);
+                yield return new Metric(GarbageCollectionsMetricDescriptor.Gen2, diagnoserResults.GcStats.Gen2Collections / (double) diagnoserResults.GcStats.TotalOperations * 1000);
+            }
 
-            yield return new Metric(AllocatedMemoryMetricDescriptor.Instance, diagnoserResults.GcStats.GetBytesAllocatedPerOperation(diagnoserResults.BenchmarkCase));
+            yield return new Metric(AllocatedMemoryMetricDescriptor.Instance, diagnoserResults.GcStats.GetBytesAllocatedPerOperation(diagnoserResults.BenchmarkCase) ?? double.NaN);
         }
 
         private class GarbageCollectionsMetricDescriptor : IMetricDescriptor
@@ -66,6 +64,7 @@ namespace BenchmarkDotNet.Diagnosers
             public string Unit => "Count";
             public bool TheGreaterTheBetter => false;
             public int PriorityInCategory { get; }
+            public bool GetIsAvailable(Metric metric) => metric.Value > 0;
         }
     }
 }

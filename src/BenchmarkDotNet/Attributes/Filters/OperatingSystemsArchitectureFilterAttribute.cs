@@ -1,4 +1,3 @@
-﻿using System.Linq;
 using BenchmarkDotNet.Filters;
 using JetBrains.Annotations;
 using System.Runtime.InteropServices;

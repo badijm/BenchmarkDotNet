@@ -1,6 +1,5 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+using BenchmarkDotNet.Detectors;
+using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Portability;
 using JetBrains.Annotations;
@@ -14,14 +13,19 @@ namespace BenchmarkDotNet.Loggers
         public static readonly ILogger Default = new ConsoleLogger();
         public static readonly ILogger Ascii = new ConsoleLogger(false);
         public static readonly ILogger Unicode = new ConsoleLogger(true);
-        private static readonly bool ConsoleSupportsColors
-            = !(RuntimeInformation.IsAndroid() || RuntimeInformation.IsIOS() || RuntimeInformation.IsWasm || RuntimeInformation.IsTvOS());
+        private static readonly Lazy<bool> ConsoleSupportsColors = new(() =>
+        {
+            if (Environment.GetEnvironmentVariable("NO_COLOR").IsNotBlank())
+                return false;
+
+            return !(OsDetector.IsMobile() || RuntimeInformation.IsWasm);
+        });
 
         private readonly bool unicodeSupport;
         private readonly Dictionary<LogKind, ConsoleColor> colorScheme;
 
         [PublicAPI]
-        public ConsoleLogger(bool unicodeSupport = false, Dictionary<LogKind, ConsoleColor> colorScheme = null)
+        public ConsoleLogger(bool unicodeSupport = false, Dictionary<LogKind, ConsoleColor>? colorScheme = null)
         {
             this.unicodeSupport = unicodeSupport;
             this.colorScheme = colorScheme ?? CreateColorfulScheme();
@@ -44,7 +48,7 @@ namespace BenchmarkDotNet.Loggers
             if (!unicodeSupport)
                 text = text.ToAscii();
 
-            if (!ConsoleSupportsColors)
+            if (!ConsoleSupportsColors.Value)
             {
                 write(text);
                 return;
@@ -67,7 +71,7 @@ namespace BenchmarkDotNet.Loggers
         }
 
         private ConsoleColor GetColor(LogKind logKind) =>
-            colorScheme.ContainsKey(logKind) ? colorScheme[logKind] : DefaultColor;
+            colorScheme.TryGetValue(logKind, out ConsoleColor value) ? value : DefaultColor;
 
         private static Dictionary<LogKind, ConsoleColor> CreateColorfulScheme() =>
             new Dictionary<LogKind, ConsoleColor>
@@ -79,6 +83,7 @@ namespace BenchmarkDotNet.Loggers
                 { LogKind.Statistic, ConsoleColor.Cyan },
                 { LogKind.Info, ConsoleColor.DarkYellow },
                 { LogKind.Error, ConsoleColor.Red },
+                { LogKind.Warning, ConsoleColor.Yellow },
                 { LogKind.Hint, ConsoleColor.DarkCyan }
             };
 
@@ -86,7 +91,7 @@ namespace BenchmarkDotNet.Loggers
         public static Dictionary<LogKind, ConsoleColor> CreateGrayScheme()
         {
             var colorScheme = new Dictionary<LogKind, ConsoleColor>();
-            foreach (var logKind in Enum.GetValues(typeof(LogKind)).Cast<LogKind>())
+            foreach (var logKind in Enum.GetValues<LogKind>())
                 colorScheme[logKind] = ConsoleColor.Gray;
             return colorScheme;
         }

@@ -1,9 +1,7 @@
-﻿using System.IO;
-using System.Linq;
-using System.Text;
-using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Reports;
+using System.Text;
 
 namespace BenchmarkDotNet.Exporters.Xml
 {
@@ -20,7 +18,7 @@ namespace BenchmarkDotNet.Exporters.Xml
             this.excludeMeasurements = excludeMeasurements;
         }
 
-        public override void ExportToLog(Summary summary, ILogger logger)
+        public override async ValueTask ExportAsync(Summary summary, CancelableStreamWriter writer, CancellationToken cancellationToken)
         {
             var serializer = BuildSerializer(summary);
 
@@ -28,13 +26,13 @@ namespace BenchmarkDotNet.Exporters.Xml
             var stringBuilder = new StringBuilder();
             using (var textWriter = new Utf8StringWriter(stringBuilder))
             {
-                using (var writer = new SimpleXmlWriter(textWriter, indentXml))
+                using (var xmlWriter = new SimpleXmlWriter(textWriter, indentXml))
                 {
-                    serializer.Serialize(writer, new SummaryDto(summary));
+                    serializer.Serialize(xmlWriter, new SummaryDto(summary));
                 }
             }
 
-            logger.WriteLine(stringBuilder.ToString());
+            await writer.WriteLineAsync(stringBuilder.ToString(), cancellationToken).ConfigureAwait(false);
         }
 
         private IXmlSerializer BuildSerializer(Summary summary)
@@ -66,6 +64,6 @@ namespace BenchmarkDotNet.Exporters.Xml
     {
         public override Encoding Encoding => Encoding.UTF8;
 
-        public Utf8StringWriter(StringBuilder builder) :base(builder) { }
+        public Utf8StringWriter(StringBuilder builder) : base(builder) { }
     }
 }

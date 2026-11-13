@@ -1,5 +1,3 @@
-﻿using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Reports;
@@ -19,7 +17,7 @@ namespace BenchmarkDotNet.Analysers
 
         protected override IEnumerable<Conclusion> AnalyseReport(BenchmarkReport report, Summary summary)
         {
-            var currentFrequency = summary.HostEnvironmentInfo.CpuInfo.Value.MaxFrequency;
+            var currentFrequency = summary.HostEnvironmentInfo.Cpu.Value.MaxFrequency();
             if (!currentFrequency.HasValue || currentFrequency <= 0)
                 currentFrequency = FallbackCpuResolutionValue.ToFrequency();
 
@@ -28,17 +26,17 @@ namespace BenchmarkDotNet.Analysers
             var workloadMeasurements = entire.Where(m => m.Is(IterationMode.Workload, IterationStage.Actual)).ToArray();
             if (workloadMeasurements.IsEmpty())
                 yield break;
-            var workload = workloadMeasurements.GetStatistics();
 
+            var workloadSample = workloadMeasurements.GetStatistics().Sample;
             var threshold = currentFrequency.Value.ToResolution().Nanoseconds / 2;
 
-            var zeroMeasurement = overheadMeasurements.Any()
-                ? ZeroMeasurementHelper.CheckZeroMeasurementTwoSamples(workload.WithoutOutliers(), overheadMeasurements.GetStatistics().WithoutOutliers())
-                : ZeroMeasurementHelper.CheckZeroMeasurementOneSample(workload.WithoutOutliers(), threshold);
+            var zeroMeasurement = overheadMeasurements.Length != 0
+                ? ZeroMeasurementHelper.AreIndistinguishable(workloadSample, overheadMeasurements.GetStatistics().Sample)
+                : ZeroMeasurementHelper.IsNegligible(workloadSample, threshold);
 
             if (zeroMeasurement)
                 yield return CreateWarning("The method duration is indistinguishable from the empty method duration",
-                                           report, false);
+                    report, false);
         }
     }
 }

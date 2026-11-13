@@ -1,27 +1,17 @@
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.IO;
 using BenchmarkDotNet.Characteristics;
+using BenchmarkDotNet.Detectors;
 using BenchmarkDotNet.Engines;
-using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Toolchains.CoreRun;
-using BenchmarkDotNet.Toolchains.MonoAotLLVM;
-using JetBrains.Annotations;
-
+using System.Diagnostics;
 
 namespace BenchmarkDotNet.Extensions
 {
-    // we need it public to reuse it in the auto-generated dll
-    // but we hide it from intellisense with following attribute
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    [PublicAPI]
-    public static class ProcessExtensions
+    internal static class ProcessExtensions
     {
         private static readonly TimeSpan DefaultKillTimeout = TimeSpan.FromSeconds(30);
 
@@ -33,7 +23,7 @@ namespace BenchmarkDotNet.Extensions
             }
             catch (Exception ex)
             {
-                logger.WriteLineError($"Failed to set up high priority. Make sure you have the right permissions. Message: {ex.Message}");
+                logger.WriteLineInfo($"// Failed to set up high priority ({ex.Message}). In order to run benchmarks with high priority, make sure you have the right permissions.");
             }
         }
 
@@ -46,7 +36,7 @@ namespace BenchmarkDotNet.Extensions
         private static IntPtr FixAffinity(IntPtr processorAffinity)
         {
             // Max supported affinity without CPU groups is 64
-            long cpuMask = Environment.ProcessorCount >= 64 ? unchecked((long)0xFFFF_FFFF_FFFF_FFFF) : (1L << Environment.ProcessorCount) - 1;
+            long cpuMask = Environment.ProcessorCount >= 64 ? unchecked((long) 0xFFFF_FFFF_FFFF_FFFF) : (1L << Environment.ProcessorCount) - 1;
 
             return RuntimeInformation.Is64BitPlatform()
                 ? new IntPtr(processorAffinity.ToInt64() & cpuMask)
@@ -58,11 +48,6 @@ namespace BenchmarkDotNet.Extensions
             ProcessPriorityClass priority,
             ILogger logger)
         {
-            if (process == null)
-                throw new ArgumentNullException(nameof(process));
-            if (logger == null)
-                throw new ArgumentNullException(nameof(logger));
-
             try
             {
                 process.PriorityClass = priority;
@@ -82,12 +67,7 @@ namespace BenchmarkDotNet.Extensions
             IntPtr processorAffinity,
             ILogger logger)
         {
-            if (process == null)
-                throw new ArgumentNullException(nameof(process));
-            if (logger == null)
-                throw new ArgumentNullException(nameof(logger));
-
-            if (!RuntimeInformation.IsWindows() && !RuntimeInformation.IsLinux())
+            if (!OsDetector.IsWindows() && !OsDetector.IsLinux())
                 return false;
 
             try
@@ -98,7 +78,7 @@ namespace BenchmarkDotNet.Extensions
             catch (Exception ex)
             {
                 logger.WriteLineError(
-                    $"// ! Failed to set up processor affinity 0x{(long)processorAffinity:X} for process {process}. Make sure you have the right permissions. Message: {ex.Message}");
+                    $"// ! Failed to set up processor affinity 0x{(long) processorAffinity:X} for process {process}. Make sure you have the right permissions. Message: {ex.Message}");
             }
 
             return false;
@@ -106,10 +86,7 @@ namespace BenchmarkDotNet.Extensions
 
         public static IntPtr? TryGetAffinity(this Process process)
         {
-            if (process == null)
-                throw new ArgumentNullException(nameof(process));
-
-            if (!RuntimeInformation.IsWindows() && !RuntimeInformation.IsLinux())
+            if (!OsDetector.IsWindows() && !OsDetector.IsLinux())
                 return null;
 
             try
@@ -124,38 +101,41 @@ namespace BenchmarkDotNet.Extensions
 
         internal static void SetEnvironmentVariables(this ProcessStartInfo start, BenchmarkCase benchmarkCase, IResolver resolver)
         {
-            if (benchmarkCase.Job.Environment.Runtime is ClrRuntime clrRuntime && !string.IsNullOrEmpty(clrRuntime.Version))
-                start.EnvironmentVariables["COMPLUS_Version"] = clrRuntime.Version;
-
-            if (benchmarkCase.Job.Environment.Runtime is MonoRuntime monoRuntime && !string.IsNullOrEmpty(monoRuntime.MonoBclPath))
-                start.EnvironmentVariables["MONO_PATH"] = monoRuntime.MonoBclPath;
-
             if (benchmarkCase.Config.HasPerfCollectProfiler())
             {
                 // enable tracing configuration inside of CoreCLR (https://github.com/dotnet/coreclr/blob/master/Documentation/project-docs/linux-performance-tracing.md#collecting-a-trace)
-                start.EnvironmentVariables["COMPlus_PerfMapEnabled"] = "1";
-                start.EnvironmentVariables["COMPlus_EnableEventLog"] = "1";
+                SetClrEnvironmentVariables(start, "PerfMapEnabled", "1");
+                SetClrEnvironmentVariables(start, "EnableEventLog", "1");
                 // enable BDN Event Source (https://github.com/dotnet/coreclr/blob/master/Documentation/project-docs/linux-performance-tracing.md#filtering)
-                start.EnvironmentVariables["COMPlus_EventSourceFilter"] = EngineEventSource.SourceName;
+                SetClrEnvironmentVariables(start, "EventSourceFilter", EngineEventSource.SourceName);
                 // workaround for https://github.com/dotnet/runtime/issues/71786, will be solved by next perf version
-                start.EnvironmentVariables["DOTNET_EnableWriteXorExecute"] = "0";
+                start.Environment["DOTNET_EnableWriteXorExecute"] = "0";
             }
 
             // corerun does not understand runtimeconfig.json files;
             // we have to set "COMPlus_GC*" environment variables as documented in
             // https://docs.microsoft.com/en-us/dotnet/core/run-time-config/garbage-collector
-            if (benchmarkCase.Job.Infrastructure.Toolchain is CoreRunToolchain _)
+            if (benchmarkCase.Job.Infrastructure.Toolchain is CoreRunToolchain)
                 start.SetCoreRunEnvironmentVariables(benchmarkCase, resolver);
 
             // disable ReSharper's Dynamic Program Analysis (see https://github.com/dotnet/BenchmarkDotNet/issues/1871 for details)
-            start.EnvironmentVariables["JETBRAINS_DPA_AGENT_ENABLE"] = "0";
+            start.Environment["JETBRAINS_DPA_AGENT_ENABLE"] = "0";
 
+            var runStrategy = benchmarkCase.Job.ResolveValueAsNullable(RunMode.RunStrategyCharacteristic);
+            if (runStrategy != RunStrategy.ColdStart)
+            {
+                SetClrEnvironmentVariables(start, JitInfo.EnvCallCountingDelayMs, "0");
+                if (runStrategy != RunStrategy.Monitoring)
+                {
+                    SetClrEnvironmentVariables(start, JitInfo.EnvOSR, "0");
+                }
+            }
 
             if (!benchmarkCase.Job.HasValue(EnvironmentMode.EnvironmentVariablesCharacteristic))
                 return;
 
-            foreach (var environmentVariable in benchmarkCase.Job.Environment.EnvironmentVariables)
-                start.EnvironmentVariables[environmentVariable.Key] = environmentVariable.Value;
+            foreach (var environmentVariable in benchmarkCase.Job.Environment.EnvironmentVariables ?? [])
+                start.Environment[environmentVariable.Key] = environmentVariable.Value;
         }
 
         // the code below was copy-pasted from https://github.com/dotnet/cli/blob/0bc24bff775e22352c2309ef990281280f92dbaa/test/Microsoft.DotNet.Tools.Tests.Utilities/Extensions/ProcessExtensions.cs#L13
@@ -164,7 +144,7 @@ namespace BenchmarkDotNet.Extensions
 
         public static void KillTree(this Process process, TimeSpan timeout)
         {
-            if (RuntimeInformation.IsWindows())
+            if (OsDetector.IsWindows())
             {
                 RunProcessAndIgnoreOutput("taskkill", $"/T /F /PID {process.Id}", timeout);
             }
@@ -210,27 +190,27 @@ namespace BenchmarkDotNet.Extensions
 
         private static (int exitCode, string output) RunProcessAndReadOutput(string fileName, string arguments, TimeSpan timeout)
         {
-            var startInfo = new ProcessStartInfo
+            using var process = new Process
             {
-                FileName = fileName,
-                Arguments = arguments,
-                RedirectStandardOutput = true,
-                UseShellExecute = false
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = false,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                },
+                EnableRaisingEvents = true
             };
-
-            using (var process = Process.Start(startInfo))
+            using var processOutputReader = new AsyncProcessOutputReader(process, readStandardError: false);
+            using (new ProcessCleanupHelper(process, processOutputReader, NullLogger.Instance))
             {
-                if (process.WaitForExit((int)timeout.TotalMilliseconds))
-                {
-                    return (process.ExitCode, process.StandardOutput.ReadToEnd());
-                }
-                else
-                {
-                    process.Kill();
-                }
-
-                return (process.ExitCode, default);
+                process.Start();
+                processOutputReader.BeginRead();
+                process.WaitForExit((int) timeout.TotalMilliseconds);
             }
+            return (process.HasExited ? process.ExitCode : -1, processOutputReader.GetOutputText());
         }
 
         private static int RunProcessAndIgnoreOutput(string fileName, string arguments, TimeSpan timeout)
@@ -245,9 +225,9 @@ namespace BenchmarkDotNet.Extensions
                 CreateNoWindow = true
             };
 
-            using (var process = Process.Start(startInfo))
+            using (var process = Process.Start(startInfo)!)
             {
-                if (!process.WaitForExit((int)timeout.TotalMilliseconds))
+                if (!process.WaitForExit((int) timeout.TotalMilliseconds))
                     process.Kill();
 
                 return process.ExitCode;
@@ -258,21 +238,75 @@ namespace BenchmarkDotNet.Extensions
         {
             var gcMode = benchmarkCase.Job.Environment.Gc;
 
-            start.EnvironmentVariables["COMPlus_gcServer"] = gcMode.ResolveValue(GcMode.ServerCharacteristic, resolver) ? "1" : "0";
-            start.EnvironmentVariables["COMPlus_gcConcurrent"] = gcMode.ResolveValue(GcMode.ConcurrentCharacteristic, resolver) ? "1" : "0";
+            SetClrEnvironmentVariables(start, "gcServer", gcMode.ResolveValue(GcMode.ServerCharacteristic, resolver) ? "1" : "0");
+            SetClrEnvironmentVariables(start, "gcConcurrent", gcMode.ResolveValue(GcMode.ConcurrentCharacteristic, resolver) ? "1" : "0");
 
             if (gcMode.HasValue(GcMode.CpuGroupsCharacteristic))
-                start.EnvironmentVariables["COMPlus_GCCpuGroup"] = gcMode.ResolveValue(GcMode.CpuGroupsCharacteristic, resolver) ? "1" : "0";
+                SetClrEnvironmentVariables(start, "GCCpuGroup", gcMode.ResolveValue(GcMode.CpuGroupsCharacteristic, resolver) ? "1" : "0");
             if (gcMode.HasValue(GcMode.AllowVeryLargeObjectsCharacteristic))
-                start.EnvironmentVariables["COMPlus_gcAllowVeryLargeObjects"] = gcMode.ResolveValue(GcMode.AllowVeryLargeObjectsCharacteristic, resolver) ? "1" : "0";
+                SetClrEnvironmentVariables(start, "gcAllowVeryLargeObjects", gcMode.ResolveValue(GcMode.AllowVeryLargeObjectsCharacteristic, resolver) ? "1" : "0");
             if (gcMode.HasValue(GcMode.RetainVmCharacteristic))
-                start.EnvironmentVariables["COMPlus_GCRetainVM"] = gcMode.ResolveValue(GcMode.RetainVmCharacteristic, resolver) ? "1" : "0";
+                SetClrEnvironmentVariables(start, "GCRetainVM", gcMode.ResolveValue(GcMode.RetainVmCharacteristic, resolver) ? "1" : "0");
             if (gcMode.HasValue(GcMode.NoAffinitizeCharacteristic))
-                start.EnvironmentVariables["COMPlus_GCNoAffinitize"] = gcMode.ResolveValue(GcMode.NoAffinitizeCharacteristic, resolver) ? "1" : "0";
+                SetClrEnvironmentVariables(start, "GCNoAffinitize", gcMode.ResolveValue(GcMode.NoAffinitizeCharacteristic, resolver) ? "1" : "0");
             if (gcMode.HasValue(GcMode.HeapAffinitizeMaskCharacteristic))
-                start.EnvironmentVariables["COMPlus_GCHeapAffinitizeMask"] = gcMode.HeapAffinitizeMask.ToString("X");
+                SetClrEnvironmentVariables(start, "GCHeapAffinitizeMask", gcMode.HeapAffinitizeMask.ToString("X"));
             if (gcMode.HasValue(GcMode.HeapCountCharacteristic))
-                start.EnvironmentVariables["COMPlus_GCHeapCount"] = gcMode.HeapCount.ToString("X");
+                SetClrEnvironmentVariables(start, "GCHeapCount", gcMode.HeapCount.ToString("X"));
         }
+
+        internal static void SetClrEnvironmentVariables(this ProcessStartInfo start, string suffix, string value)
+        {
+            start.Environment[$"DOTNET_{suffix}"] = value;
+            start.Environment[$"COMPlus_{suffix}"] = value;
+        }
+
+#if !NET5_0_OR_GREATER
+        public static async Task WaitForExitAsync(this Process process, CancellationToken cancellationToken = default)
+        {
+            if (!process.HasExited)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            try
+            {
+                process.EnableRaisingEvents = true;
+            }
+            catch (InvalidOperationException)
+            {
+                if (process.HasExited)
+                {
+                    // BCL waits for output streams to be drained here, but we don't have access to the internal EOF streams.
+                    // Callers use AsyncProcessOutputReader, so it's not really necessary anyway.
+                    return;
+                }
+                throw;
+            }
+
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            EventHandler handler = (_, _) => tcs.TrySetResult(null);
+            process.Exited += handler;
+
+            try
+            {
+                if (!process.HasExited)
+                {
+                    using (cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken), false))
+                    {
+                        await tcs.Task.ConfigureAwait(false);
+                    }
+                }
+
+                // BCL waits for output streams to be drained here, but we don't have access to the internal EOF streams.
+                // Callers use AsyncProcessOutputReader, so it's not really necessary anyway.
+            }
+            finally
+            {
+                process.Exited -= handler;
+            }
+        }
+#endif
     }
 }

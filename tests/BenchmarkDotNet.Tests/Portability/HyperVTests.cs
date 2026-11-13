@@ -1,5 +1,4 @@
-﻿using BenchmarkDotNet.Portability;
-using Xunit;
+using BenchmarkDotNet.Portability;
 
 namespace BenchmarkDotNet.Tests.Portability
 {
@@ -21,9 +20,9 @@ namespace BenchmarkDotNet.Tests.Portability
         [InlineData("Dell", "ubuntu", false)]
         [InlineData("microsoft corporation", null, false)]
         [InlineData(null, "virtual machine", false)]
-        public void DetectsVirtualMachine(string manufacturer, string model, bool expectedResult)
+        public void DetectsVirtualMachine(string? manufacturer, string? model, bool expectedResult)
         {
-            bool result = hypervisor.IsVirtualMachine(manufacturer, model);
+            bool result = hypervisor.IsVirtualMachine(manufacturer!, model!);
             Assert.Equal(expectedResult, result);
         }
     }

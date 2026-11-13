@@ -1,10 +1,9 @@
-﻿// Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
 // file copied from https://github.com/dotnet/runtime/blob/bf2e135c12cbd34aeba2fa4a31d0e84184041a17/src/libraries/Common/tests/System/IO/PathFeatures.cs
 
-using System;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -59,11 +58,11 @@ namespace BenchmarkDotNet.Extensions
             if (RunningOnCoreLib)
                 return false;
 
-            Type t = typeof(object).GetTypeInfo().Assembly.GetType("System.AppContextSwitches");
+            Type t = typeof(object).GetTypeInfo().Assembly.GetType("System.AppContextSwitches")!;
             var p = t.GetProperty(propertyName, BindingFlags.Static | BindingFlags.Public);
 
             // If the switch actually exists use it, otherwise we predate the switch and are effectively on
-            return (bool)(p?.GetValue(null) ?? true);
+            return (bool) (p?.GetValue(null) ?? true);
         }
 
         private static bool RunningOnCoreLib

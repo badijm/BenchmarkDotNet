@@ -1,6 +1,4 @@
-﻿using Iced.Intel;
-using System;
-using System.Collections.Generic;
+using Iced.Intel;
 
 namespace BenchmarkDotNet.Disassemblers
 {

@@ -1,43 +1,34 @@
-﻿using System;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Loggers;
+using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Toolchains;
 using BenchmarkDotNet.Toolchains.Parameters;
 using BenchmarkDotNet.Toolchains.Results;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
-    public class ToolchainTest : BenchmarkTestExecutor
+    public sealed class MockToolchain(string name, Runtime runtime, IBuilder builder, IExecutor executor)
+        : Toolchain(name, runtime, builder, executor)
     {
-        public ToolchainTest(ITestOutputHelper output) : base(output) { }
+    }
 
-        private class MyGenerator : IGenerator
-        {
-            public bool Done { get; private set; }
-
-            public GenerateResult GenerateProject(BuildPartition buildPartition, ILogger logger, string rootArtifactsFolderPath)
-            {
-                logger.WriteLine("Generating");
-                Done = true;
-                return new GenerateResult(null, true, null, Array.Empty<string>());
-            }
-        }
-
+    public class ToolchainTest(ITestOutputHelper output) : BenchmarkTestExecutor(output)
+    {
         private class MyBuilder : IBuilder
         {
             public bool Done { get; private set; }
 
-            public BuildResult Build(GenerateResult generateResult, BuildPartition buildPartition, ILogger logger)
+            public bool GetSupportsConcurrency(BuildPartition buildPartition) => true;
+
+            public ValueTask<BuildResult> BuildAsync(BuildPartition buildPartition, ILogger logger, string rootArtifactsFolderPath, CancellationToken cancellationToken)
             {
                 logger.WriteLine("Building");
                 Done = true;
-                return BuildResult.Success(generateResult);
+                return new(BuildResult.Success(ArtifactsPaths.Empty));
             }
         }
 
@@ -45,11 +36,11 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             public bool Done { get; private set; }
 
-            public ExecuteResult Execute(ExecuteParameters executeParameters)
+            public ValueTask<ExecuteResult> ExecuteAsync(ExecuteParameters executeParameters, CancellationToken cancellationToken)
             {
                 executeParameters.Logger.WriteLine("Executing");
                 Done = true;
-                return new ExecuteResult(true, 0, default, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), executeParameters.LaunchIndex);
+                return new(new ExecuteResult(true, 0, default, [], [], [], executeParameters.LaunchIndex));
             }
         }
 
@@ -66,16 +57,14 @@ namespace BenchmarkDotNet.IntegrationTests
         {
             var logger = new OutputLogger(Output);
 
-            var generator = new MyGenerator();
             var builder = new MyBuilder();
             var executor = new MyExecutor();
-            var myToolchain = new Toolchain("My", generator, builder, executor);
-            var job = new Job(Job.Dry) { Infrastructure = { Toolchain = myToolchain} };
+            var myToolchain = new MockToolchain("My", UnknownRuntime.Instance, builder, executor);
+            var job = new Job(Job.Dry) { Infrastructure = { Toolchain = myToolchain } };
             var config = CreateSimpleConfig(logger).AddJob(job);
 
             CanExecute<ToolchainBenchmark>(config, fullValidation: false);
 
-            Assert.True(generator.Done);
             Assert.True(builder.Done);
             Assert.True(executor.Done);
         }

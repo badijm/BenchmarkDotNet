@@ -1,178 +1,479 @@
-﻿using System;
-using System.Linq;
-using System.Reflection;
-using System.Threading.Tasks;
+using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
+using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Helpers;
+using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
+using Perfolizer.Horology;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using static BenchmarkDotNet.Code.RunnableConstants;
 
 namespace BenchmarkDotNet.Code
 {
-    internal abstract class DeclarationsProvider
+    internal abstract class DeclarationsProvider(BenchmarkCase benchmark)
     {
-        // "GlobalSetup" or "GlobalCleanup" methods are optional, so default to an empty delegate, so there is always something that can be invoked
-        private const string EmptyAction = "() => { }";
+        protected static readonly string CoreReturnType = typeof(ValueTask<ClockSpan>).GetCorrectCSharpTypeName();
+        protected static readonly string CoreParameters = $"long invokeCount, {typeof(IClock).GetCorrectCSharpTypeName()} clock";
+        protected static readonly string StartClockSyncCode = $"{typeof(StartedClock).GetCorrectCSharpTypeName()} startedClock = {typeof(ClockExtensions).GetCorrectCSharpTypeName()}.Start(clock);";
+        protected static readonly string ReturnSyncCode = $"return new {CoreReturnType}(startedClock.GetElapsed());";
+        private static readonly string ReturnCompletedValueTask = $"return new {typeof(ValueTask).GetCorrectCSharpTypeName()}();";
+        private enum ExtraImplKind { None, GlobalSetup, GlobalCleanup }
 
-        protected readonly Descriptor Descriptor;
+        protected BenchmarkCase Benchmark { get; } = benchmark;
+        protected Descriptor Descriptor => Benchmark.Descriptor;
 
-        internal DeclarationsProvider(Descriptor descriptor) => Descriptor = descriptor;
+        public abstract string[] GetExtraFields();
 
-        public string OperationsPerInvoke => Descriptor.OperationsPerInvoke.ToString();
-
-        public string WorkloadTypeName => Descriptor.Type.GetCorrectCSharpTypeName();
-
-        public string GlobalSetupMethodName => GetMethodName(Descriptor.GlobalSetupMethod);
-
-        public string GlobalCleanupMethodName => GetMethodName(Descriptor.GlobalCleanupMethod);
-
-        public string IterationSetupMethodName => Descriptor.IterationSetupMethod?.Name ?? EmptyAction;
-
-        public string IterationCleanupMethodName => Descriptor.IterationCleanupMethod?.Name ?? EmptyAction;
-
-        public abstract string ReturnsDefinition { get; }
-
-        protected virtual Type WorkloadMethodReturnType => Descriptor.WorkloadMethod.ReturnType;
-
-        public virtual string WorkloadMethodReturnTypeName => WorkloadMethodReturnType.GetCorrectCSharpTypeName();
-
-        public virtual string WorkloadMethodDelegate(string passArguments) => Descriptor.WorkloadMethod.Name;
-
-        public virtual string WorkloadMethodReturnTypeModifiers => null;
-
-        public virtual string GetWorkloadMethodCall(string passArguments) => $"{Descriptor.WorkloadMethod.Name}({passArguments})";
-
-        public virtual string ConsumeField => null;
-
-        protected abstract Type OverheadMethodReturnType { get; }
-
-        public string OverheadMethodReturnTypeName => OverheadMethodReturnType.GetCorrectCSharpTypeName();
-
-        public abstract string OverheadImplementation { get; }
-
-        private string GetMethodName(MethodInfo method)
+        public SmartStringBuilder ReplaceTemplate(SmartStringBuilder smartStringBuilder)
         {
+            Replace(smartStringBuilder, Descriptor.GlobalSetupMethod, "$GlobalSetupModifiers$", "$GlobalSetupImpl$", ExtraImplKind.GlobalSetup);
+            Replace(smartStringBuilder, Descriptor.GlobalCleanupMethod, "$GlobalCleanupModifiers$", "$GlobalCleanupImpl$", ExtraImplKind.GlobalCleanup);
+            Replace(smartStringBuilder, Descriptor.IterationSetupMethod, "$IterationSetupModifiers$", "$IterationSetupImpl$", ExtraImplKind.None);
+            Replace(smartStringBuilder, Descriptor.IterationCleanupMethod, "$IterationCleanupModifiers$", "$IterationCleanupImpl$", ExtraImplKind.None);
+            return ReplaceCore(smartStringBuilder)
+                .Replace("$DisassemblerEntryMethodImpl$", GetWorkloadMethodCall(GetPassArgumentsDirect()))
+                .Replace("$OperationsPerInvoke$", Descriptor.OperationsPerInvoke.ToString())
+                .Replace("$WorkloadMethodName$", Descriptor.WorkloadMethod.Name)
+                .Replace("$WorkloadMethodParameterTypes$", GetWorkloadMethodParameterTypes())
+                .Replace("$WorkloadTypeName$", Descriptor.Type.GetCorrectCSharpTypeName());
+        }
+
+        private void Replace(SmartStringBuilder smartStringBuilder, MethodInfo? method, string replaceModifiers, string replaceImpl, ExtraImplKind extraImplKind)
+        {
+            string modifier;
+            string userImpl;
+            bool needsExplicitReturn;
             if (method == null)
             {
-                return EmptyAction;
+                modifier = string.Empty;
+                userImpl = string.Empty;
+                needsExplicitReturn = true;
             }
-
-            if (method.ReturnType == typeof(Task) ||
-                method.ReturnType == typeof(ValueTask) ||
-                (method.ReturnType.IsGenericType &&
-                    (method.ReturnType.GetGenericTypeDefinition() == typeof(Task<>) ||
-                     method.ReturnType.GetGenericTypeDefinition() == typeof(ValueTask<>))))
+            else if (method.ReturnType.IsAwaitable(out _))
             {
-                return $"() => {method.Name}().GetAwaiter().GetResult()";
+                modifier = "async";
+                userImpl = $"await {GetMethodPrefix(method)}.{method.Name}();";
+                needsExplicitReturn = false;
+            }
+            else
+            {
+                modifier = string.Empty;
+                userImpl = $"{GetMethodPrefix(method)}.{method.Name}();";
+                needsExplicitReturn = true;
             }
 
-            return method.Name;
+            string explicitReturn = needsExplicitReturn ? ReturnCompletedValueTask : string.Empty;
+            string impl = extraImplKind switch
+            {
+                // Append auto-generated setup code after user setup code.
+                ExtraImplKind.GlobalSetup => CombineLines(userImpl, GetExtraGlobalSetupImpl(), explicitReturn),
+                // Prepend auto-generated cleanup code before user cleanup code.
+                ExtraImplKind.GlobalCleanup => CombineLines(GetExtraGlobalCleanupImpl(), userImpl, explicitReturn),
+                _ => CombineLines(userImpl, explicitReturn),
+            };
+
+            smartStringBuilder
+                .Replace(replaceModifiers, modifier)
+                .Replace(replaceImpl, impl);
         }
-    }
 
-    internal class VoidDeclarationsProvider : DeclarationsProvider
-    {
-        public VoidDeclarationsProvider(Descriptor descriptor) : base(descriptor) { }
+        private static string CombineLines(params string[] parts)
+            => string.Join($"{Environment.NewLine}            ", parts.Where(p => !string.IsNullOrEmpty(p)));
 
-        public override string ReturnsDefinition => "RETURNS_VOID";
+        protected virtual string GetExtraGlobalSetupImpl() => string.Empty;
+        protected virtual string GetExtraGlobalCleanupImpl() => string.Empty;
 
-        protected override Type OverheadMethodReturnType => typeof(void);
+        protected abstract SmartStringBuilder ReplaceCore(SmartStringBuilder smartStringBuilder);
 
-        public override string OverheadImplementation => string.Empty;
-    }
+        private static string GetMethodPrefix(MethodInfo method)
+            => method.IsStatic ? method.DeclaringType!.GetCorrectCSharpTypeName() : "base";
 
-    internal class NonVoidDeclarationsProvider : DeclarationsProvider
-    {
-        public NonVoidDeclarationsProvider(Descriptor descriptor) : base(descriptor) { }
+        protected string GetWorkloadMethodCall(string passArguments)
+             => $"{GetMethodPrefix(Descriptor.WorkloadMethod)}.{Descriptor.WorkloadMethod.Name}({passArguments});";
 
-        public override string ConsumeField
-            => !Consumer.IsConsumable(WorkloadMethodReturnType) && Consumer.HasConsumableField(WorkloadMethodReturnType, out var field)
-                ? $".{field.Name}"
-                : null;
+        protected string GetLoadArguments()
+            => string.Join(
+                Environment.NewLine,
+                Descriptor.WorkloadMethod.GetParameters()
+                    .Select((parameter, index) =>
+                    {
+                        var refModifier = parameter.ParameterType.IsByRef ? "ref " : string.Empty;
+                        return $"{refModifier}{parameter.ParameterType.GetCorrectCSharpTypeName()} arg{index} = {refModifier}{LoadArgument(parameter, index)};";
+                    })
+            );
 
-        protected override Type OverheadMethodReturnType
-            => Consumer.IsConsumable(WorkloadMethodReturnType)
-                ? WorkloadMethodReturnType
-                : (Consumer.HasConsumableField(WorkloadMethodReturnType, out var field)
-                    ? field.FieldType
-                    : typeof(int)); // we return this simple type because creating bigger ValueType could take longer than benchmarked method itself
-
-        public override string OverheadImplementation
+        // A by-ref-like parameter is held in its field as the value's own type (#774), so loading it back is the
+        // conversion. The cast is what invokes it: C# applies only an implicit operator to a bare assignment, and
+        // the rule admits an explicit one too - the same pair the in-process emitter looks up.
+        private string LoadArgument(ParameterInfo parameter, int index)
         {
-            get
-            {
-                string value;
-                var type = OverheadMethodReturnType;
-                if (type.GetTypeInfo().IsPrimitive)
-                    value = $"default({type.GetCorrectCSharpTypeName()})";
-                else if (type.GetTypeInfo().IsClass || type.GetTypeInfo().IsInterface)
-                    value = "null";
-                else
-                    value = SourceCodeHelper.ToSourceCode(Activator.CreateInstance(type)) + ";";
-                return $"return {value};";
-            }
+            string field = $"this.{FieldsContainerName}.{ArgFieldPrefix}{index}";
+            var parameterType = parameter.ParameterType.WithoutRefModifier();
+
+            if (!parameterType.IsByRefLike())
+                return field;
+
+            // Special-case string-to-ReadOnlySpan<char> (C# first-class-span feature).
+            var held = Benchmark.Parameters.GetArgument(parameter.Name!).ParameterValue.SourceType;
+            return ReflectionExtensions.StringAsSpanMethod(parameterType, held) is { } helper
+                ? $"{helper.DeclaringType!.GetCorrectCSharpTypeName()}.{helper.Name}({field})"
+                : $"({parameterType.GetCorrectCSharpTypeName()}) {field}";
         }
 
-        public override string ReturnsDefinition
-            => Consumer.IsConsumable(WorkloadMethodReturnType) || Consumer.HasConsumableField(WorkloadMethodReturnType, out _)
-                ? "RETURNS_CONSUMABLE"
-                : "RETURNS_NON_CONSUMABLE_STRUCT";
+        protected string GetPassArguments()
+            => string.Join(
+                ", ",
+                Descriptor.WorkloadMethod.GetParameters()
+                    .Select((parameter, index) => $"{CodeGenerator.GetParameterModifier(parameter)} arg{index}")
+            );
+
+        // Renders the benchmark method's parameter types as a Type[] for Run's workload-method resolution to match overloads
+        // exactly. Each is a typeof(...) of the element type, re-wrapping by-ref/pointer via reflection (typeof can't
+        // express `T&`), so resolution never has to name the method's (possibly unspellable) return type.
+        private string GetWorkloadMethodParameterTypes()
+        {
+            var parameters = Descriptor.WorkloadMethod.GetParameters();
+            if (parameters.Length == 0)
+                return "global::System.Array.Empty<global::System.Type>()";
+            return $"new global::System.Type[] {{ {string.Join(", ", parameters.Select(p => GetTypeOfExpression(p.ParameterType)))} }}";
+        }
+
+        private static string GetTypeOfExpression(System.Type type)
+        {
+            if (type.IsByRef)
+                return $"{GetTypeOfExpression(type.GetElementType()!)}.MakeByRefType()";
+            if (type.IsPointer)
+                return $"{GetTypeOfExpression(type.GetElementType()!)}.MakePointerType()";
+            return $"typeof({type.GetCorrectCSharpTypeName()})";
+        }
+
+        protected string GetPassArgumentsDirect()
+            => string.Join(
+                ", ",
+                Descriptor.WorkloadMethod.GetParameters()
+                    .Select((parameter, index) => $"{CodeGenerator.GetParameterModifier(parameter)} {LoadArgument(parameter, index)}")
+            );
     }
 
-    internal class ByRefDeclarationsProvider : NonVoidDeclarationsProvider
+    internal sealed class SyncDeclarationsProvider(BenchmarkCase benchmark) : DeclarationsProvider(benchmark)
     {
-        public ByRefDeclarationsProvider(Descriptor descriptor) : base(descriptor) { }
+        public override string[] GetExtraFields() => [];
 
-        protected override Type OverheadMethodReturnType => typeof(IntPtr);
+        protected override SmartStringBuilder ReplaceCore(SmartStringBuilder smartStringBuilder)
+        {
+            string loadArguments = GetLoadArguments();
+            string passArguments = GetPassArguments();
+            string workloadMethodCall = GetWorkloadMethodCall(passArguments);
+            string coreImpl = $$"""
+            private {{CoreReturnType}} {{OverheadActionUnrollMethodName}}({{CoreParameters}})
+                    {
+                        unsafe
+                        {
+                            {{loadArguments}}
+                            {{StartClockSyncCode}}
+                            while (--invokeCount >= 0)
+                            {
+                                this.{{OverheadImplementationMethodName}}({{passArguments}});@Unroll@
+                            }
+                            {{ReturnSyncCode}}
+                        }
+                    }
 
-        public override string WorkloadMethodReturnTypeName => base.WorkloadMethodReturnTypeName.Replace("&", string.Empty);
+                    private {{CoreReturnType}} {{OverheadActionNoUnrollMethodName}}({{CoreParameters}})
+                    {
+                        unsafe
+                        {
+                            {{loadArguments}}
+                            {{StartClockSyncCode}}
+                            while (--invokeCount >= 0)
+                            {
+                                this.{{OverheadImplementationMethodName}}({{passArguments}});
+                            }
+                            {{ReturnSyncCode}}
+                        }
+                    }
 
-        public override string ConsumeField => null;
+                    private {{CoreReturnType}} {{WorkloadActionUnrollMethodName}}({{CoreParameters}})
+                    {
+                        unsafe
+                        {
+                            {{loadArguments}}
+                            {{StartClockSyncCode}}
+                            while (--invokeCount >= 0)
+                            {
+                                {{workloadMethodCall}}@Unroll@
+                            }
+                            {{ReturnSyncCode}}
+                        }
+                    }
 
-        public override string OverheadImplementation => $"return default(System.{nameof(IntPtr)});";
+                    private {{CoreReturnType}} {{WorkloadActionNoUnrollMethodName}}({{CoreParameters}})
+                    {
+                        unsafe
+                        {
+                            {{loadArguments}}
+                            {{StartClockSyncCode}}
+                            while (--invokeCount >= 0)
+                            {
+                                {{workloadMethodCall}}
+                            }
+                            {{ReturnSyncCode}}
+                        }
+                    }
+            """;
 
-        public override string ReturnsDefinition => "RETURNS_BYREF";
-
-        public override string WorkloadMethodReturnTypeModifiers => "ref";
+            return smartStringBuilder
+                .Replace("$CoreImpl$", coreImpl);
+        }
     }
 
-    internal class ByReadOnlyRefDeclarationsProvider : ByRefDeclarationsProvider
+    // Used when Job.Run.ConsumeTasksSynchronously is enabled for (Value)Task(<T>)-returning workloads.
+    // Generates a synchronous loop that blocks on the returned task via AwaitHelper.GetResult, matching the
+    // pre-async-refactor behavior so historical results stay comparable.
+    internal sealed class SyncTaskDeclarationsProvider(BenchmarkCase benchmark) : DeclarationsProvider(benchmark)
     {
-        public ByReadOnlyRefDeclarationsProvider(Descriptor descriptor) : base(descriptor) { }
+        public override string[] GetExtraFields() => [];
 
-        public override string ReturnsDefinition => "RETURNS_BYREF_READONLY";
+        protected override SmartStringBuilder ReplaceCore(SmartStringBuilder smartStringBuilder)
+        {
+            string loadArguments = GetLoadArguments();
+            string passArguments = GetPassArguments();
+            string workloadMethodCall = $"global::{typeof(AwaitHelper).FullName}.{nameof(AwaitHelper.GetResult)}({GetWorkloadMethodCall(passArguments).TrimEnd(';')});";
+            string coreImpl = $$"""
+            private {{CoreReturnType}} {{OverheadActionUnrollMethodName}}({{CoreParameters}})
+                    {
+                        {{loadArguments}}
+                        {{StartClockSyncCode}}
+                        while (--invokeCount >= 0)
+                        {
+                            this.{{OverheadImplementationMethodName}}({{passArguments}});@Unroll@
+                        }
+                        {{ReturnSyncCode}}
+                    }
 
-        public override string WorkloadMethodReturnTypeModifiers => "ref readonly";
+                    private {{CoreReturnType}} {{OverheadActionNoUnrollMethodName}}({{CoreParameters}})
+                    {
+                        {{loadArguments}}
+                        {{StartClockSyncCode}}
+                        while (--invokeCount >= 0)
+                        {
+                            this.{{OverheadImplementationMethodName}}({{passArguments}});
+                        }
+                        {{ReturnSyncCode}}
+                    }
+
+                    private {{CoreReturnType}} {{WorkloadActionUnrollMethodName}}({{CoreParameters}})
+                    {
+                        {{loadArguments}}
+                        {{StartClockSyncCode}}
+                        while (--invokeCount >= 0)
+                        {
+                            {{workloadMethodCall}}@Unroll@
+                        }
+                        {{ReturnSyncCode}}
+                    }
+
+                    private {{CoreReturnType}} {{WorkloadActionNoUnrollMethodName}}({{CoreParameters}})
+                    {
+                        {{loadArguments}}
+                        {{StartClockSyncCode}}
+                        while (--invokeCount >= 0)
+                        {
+                            {{workloadMethodCall}}
+                        }
+                        {{ReturnSyncCode}}
+                    }
+            """;
+
+            return smartStringBuilder
+                .Replace("$CoreImpl$", coreImpl);
+        }
     }
 
-    internal class TaskDeclarationsProvider : VoidDeclarationsProvider
+    internal abstract class AsyncDeclarationsProviderBase(BenchmarkCase benchmark) : DeclarationsProvider(benchmark)
     {
-        public TaskDeclarationsProvider(Descriptor descriptor) : base(descriptor) { }
+        // Type used to drive the WorkloadCore builder selection. For ordinary awaitables it's the workload
+        // method's own return type, but `IAsyncEnumerable<T>` has no GetAwaiter, so AsyncEnumerableDeclarationsProvider
+        // overrides this to expose the MoveNextAsync awaitable as a proxy.
+        protected virtual Type WorkloadAwaitableReturnType => Descriptor.WorkloadMethod.ReturnType;
 
-        // we use GetAwaiter().GetResult() because it's fastest way to obtain the result in blocking way,
-        // and will eventually throw actual exception, not aggregated one
-        public override string WorkloadMethodDelegate(string passArguments)
-            => $"({passArguments}) => {{ {Descriptor.WorkloadMethod.Name}({passArguments}).GetAwaiter().GetResult(); }}";
+        public override string[] GetExtraFields() =>
+        [
+            $"public {typeof(WorkloadValueTaskSource).GetCorrectCSharpTypeName()} {WorkloadValueTaskSourceFieldName};",
+            $"public {typeof(IClock).GetCorrectCSharpTypeName()} {ClockFieldName};",
+            $"public long {InvokeCountFieldName};"
+        ];
 
-        public override string GetWorkloadMethodCall(string passArguments) => $"{Descriptor.WorkloadMethod.Name}({passArguments}).GetAwaiter().GetResult()";
+        protected override string GetExtraGlobalSetupImpl()
+            => $$"""
+            this.{{FieldsContainerName}}.{{WorkloadValueTaskSourceFieldName}} = new {{typeof(WorkloadValueTaskSource).GetCorrectCSharpTypeName()}}();
+                        this.{{StartWorkloadMethodName}}();
+            """;
 
-        protected override Type WorkloadMethodReturnType => typeof(void);
+        protected override string GetExtraGlobalCleanupImpl()
+            => $"this.{FieldsContainerName}.{WorkloadValueTaskSourceFieldName}.Complete();";
+
+        protected bool TryGetAsyncMethodBuilderAttribute(out string asyncMethodBuilderAttribute)
+        {
+            asyncMethodBuilderAttribute = string.Empty;
+            if (Descriptor.WorkloadMethod.HasAttribute<AsyncCallerTypeAttribute>())
+            {
+                return false;
+            }
+            if (Descriptor.WorkloadMethod.GetAsyncMethodBuilderAttribute() is not { } attr)
+            {
+                return false;
+            }
+            if (attr.GetType().GetProperty(nameof(AsyncMethodBuilderAttribute.BuilderType), BindingFlags.Public | BindingFlags.Instance)?.GetValue(attr) is not Type builderType)
+            {
+                return false;
+            }
+            asyncMethodBuilderAttribute = $"[{typeof(AsyncMethodBuilderAttribute).GetCorrectCSharpTypeName()}(typeof({builderType.GetCorrectCSharpTypeName(unboundGenericDefinition: true)}))]";
+            return true;
+        }
+
+        protected Type GetWorkloadCoreReturnType(bool hasAsyncMethodBuilderAttribute, Type returnType)
+        {
+            if (Descriptor.WorkloadMethod.ResolveAttribute<AsyncCallerTypeAttribute>() is { } asyncCallerTypeAttribute)
+            {
+                return asyncCallerTypeAttribute.AsyncCallerType;
+            }
+            if (hasAsyncMethodBuilderAttribute
+                || returnType.HasAsyncMethodBuilderAttribute()
+                // Task and Task<T> are not annotated with their builder type, the C# compiler special-cases them.
+                || (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
+            )
+            {
+                return returnType;
+            }
+            // Fallback to Task if the return type is Task or any awaitable type that is not a custom task-like type.
+            return typeof(Task);
+        }
+
+        protected static string GetFinalReturn(Type workloadCoreReturnType)
+        {
+            var finalReturnType = workloadCoreReturnType
+                .GetMethod(nameof(Task.GetAwaiter), BindingFlags.Public | BindingFlags.Instance)!
+                .ReturnType!
+                .GetMethod(nameof(TaskAwaiter.GetResult))!
+                .ReturnType;
+            return finalReturnType == typeof(void)
+                ? "return;"
+                : $"return default({finalReturnType.GetCorrectCSharpTypeName()});";
+        }
+
+        protected override SmartStringBuilder ReplaceCore(SmartStringBuilder smartStringBuilder)
+        {
+            // Unlike sync calls, async calls suffer from unrolling, so we multiply the invokeCount by the unroll factor and delegate the implementation to *NoUnroll methods.
+            int unrollFactor = Benchmark.Job.ResolveValue(RunMode.UnrollFactorCharacteristic, EnvironmentResolver.Instance);
+            string passArguments = GetPassArgumentsDirect();
+            string workloadMethodCall = GetWorkloadMethodCall(passArguments);
+            bool hasAsyncMethodBuilderAttribute = TryGetAsyncMethodBuilderAttribute(out var asyncMethodBuilderAttribute);
+            Type workloadCoreReturnType = GetWorkloadCoreReturnType(hasAsyncMethodBuilderAttribute, WorkloadAwaitableReturnType);
+            string finalReturn = GetFinalReturn(workloadCoreReturnType);
+            string coreImpl = $$"""
+            private {{CoreReturnType}} {{OverheadActionUnrollMethodName}}({{CoreParameters}})
+                    {
+                        return this.{{OverheadActionNoUnrollMethodName}}(invokeCount * {{unrollFactor}}, clock);
+                    }
+
+                    private {{CoreReturnType}} {{OverheadActionNoUnrollMethodName}}({{CoreParameters}})
+                    {
+                        {{StartClockSyncCode}}
+                        while (--invokeCount >= 0)
+                        {
+                            this.{{OverheadImplementationMethodName}}({{passArguments}});
+                        }
+                        {{ReturnSyncCode}}
+                    }
+
+                    private {{CoreReturnType}} {{WorkloadActionUnrollMethodName}}({{CoreParameters}})
+                    {
+                        return this.{{WorkloadActionNoUnrollMethodName}}(invokeCount * {{unrollFactor}}, clock);
+                    }
+
+                    private {{CoreReturnType}} {{WorkloadActionNoUnrollMethodName}}({{CoreParameters}})
+                    {
+                        this.{{FieldsContainerName}}.{{InvokeCountFieldName}} = invokeCount;
+                        this.{{FieldsContainerName}}.{{ClockFieldName}} = clock;
+                        // The source is allocated and the workload loop started in GlobalSetup,
+                        // so this hot path is branchless and allocation-free.
+                        return this.{{FieldsContainerName}}.{{WorkloadValueTaskSourceFieldName}}.Continue();
+                    }
+
+                    private async void {{StartWorkloadMethodName}}()
+                    {
+                        await {{WorkloadCoreMethodName}}();
+                    }
+
+                    {{asyncMethodBuilderAttribute}}
+                    private async {{workloadCoreReturnType.GetCorrectCSharpTypeName()}} {{WorkloadCoreMethodName}}()
+                    {
+                        try
+                        {
+                            if (await this.{{FieldsContainerName}}.{{WorkloadValueTaskSourceFieldName}}.GetIsComplete())
+                            {
+                                {{finalReturn}}
+                            }
+                            while (true)
+                            {
+                                {{typeof(StartedClock).GetCorrectCSharpTypeName()}} startedClock = {{typeof(ClockExtensions).GetCorrectCSharpTypeName()}}.Start(this.{{FieldsContainerName}}.{{ClockFieldName}});
+                                while (--this.{{FieldsContainerName}}.{{InvokeCountFieldName}} >= 0)
+                                {
+                                    {{GetCallAndConsumeImpl(workloadMethodCall)}}
+                                }
+                                if (await this.{{FieldsContainerName}}.{{WorkloadValueTaskSourceFieldName}}.SetResultAndGetIsComplete(startedClock.GetElapsed()))
+                                {
+                                    {{finalReturn}}
+                                }
+                            }
+                        }
+                        catch (global::System.Exception e)
+                        {
+                            {{FieldsContainerName}}.{{WorkloadValueTaskSourceFieldName}}.SetException(e);
+                            {{finalReturn}}
+                        }
+                    }
+            """;
+
+            return smartStringBuilder
+                .Replace("$CoreImpl$", coreImpl);
+        }
+
+        protected abstract string GetCallAndConsumeImpl(string workloadMethodCall);
     }
 
-    /// <summary>
-    /// declarations provider for <see cref="Task{TResult}" /> and <see cref="ValueTask{TResult}" />
-    /// </summary>
-    internal class GenericTaskDeclarationsProvider : NonVoidDeclarationsProvider
+    internal class AsyncDeclarationsProvider(BenchmarkCase benchmark, Type resultType) : AsyncDeclarationsProviderBase(benchmark)
     {
-        public GenericTaskDeclarationsProvider(Descriptor descriptor) : base(descriptor) { }
+        protected override string GetCallAndConsumeImpl(string workloadMethodCall)
+        {
+            if (resultType == typeof(void))
+            {
+                return $"await {workloadMethodCall}";
+            }
+            var resultTypeName = resultType.GetCorrectCSharpTypeName();
+            return $"""
+            {resultTypeName} result = await {workloadMethodCall}
+                                    {typeof(DeadCodeEliminationHelper).GetCorrectCSharpTypeName()}.KeepAliveWithoutBoxing<{resultTypeName}>(in result);
+            """;
+        }
+    }
 
-        protected override Type WorkloadMethodReturnType => Descriptor.WorkloadMethod.ReturnType.GetTypeInfo().GetGenericArguments().Single();
+    internal class AsyncEnumerableDeclarationsProvider(BenchmarkCase benchmark, Type itemType, Type moveNextAwaitableType) : AsyncDeclarationsProviderBase(benchmark)
+    {
+        protected override Type WorkloadAwaitableReturnType => moveNextAwaitableType;
 
-        // we use GetAwaiter().GetResult() because it's fastest way to obtain the result in blocking way,
-        // and will eventually throw actual exception, not aggregated one
-        public override string WorkloadMethodDelegate(string passArguments)
-            => $"({passArguments}) => {{ return {Descriptor.WorkloadMethod.Name}({passArguments}).GetAwaiter().GetResult(); }}";
-
-        public override string GetWorkloadMethodCall(string passArguments) => $"{Descriptor.WorkloadMethod.Name}({passArguments}).GetAwaiter().GetResult()";
+        protected override string GetCallAndConsumeImpl(string workloadMethodCall)
+        {
+            string itemTypeName = itemType.GetCorrectCSharpTypeName();
+            return $$"""
+            await foreach ({{itemTypeName}} item in {{workloadMethodCall.TrimEnd(';')}})
+                                    {
+                                        {{typeof(DeadCodeEliminationHelper).GetCorrectCSharpTypeName()}}.KeepAliveWithoutBoxing<{{itemTypeName}}>(in item);
+                                    }
+            """;
+        }
     }
 }

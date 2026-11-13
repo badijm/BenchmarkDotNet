@@ -15,6 +15,50 @@ There are several categories of characteristics which you can specify. Let's con
 
 It's a single string characteristic. It allows to name your job. This name will be used in logs and a part of a folder name with generated files for this job. `Id` doesn't affect benchmark results, but it can be useful for diagnostics. If you don't specify `Id`, random value will be chosen based on other characteristics
 
+### Categories
+
+Job categories are the job equivalent of `[BenchmarkCategory]`: they allow you to group jobs so that you can select which ones to run. A job can belong to any number of categories, and the comparison is case insensitive.
+
+```cs
+var config = DefaultConfig.Instance
+    .AddJob(Job.Default.WithRuntime(CoreRuntime.Core80).WithCategories("runtimes", "net8"))
+    .AddJob(Job.Default.WithRuntime(CoreRuntime.Core90).WithCategories("runtimes", "net9"))
+    .AddJob(Job.Dry.WithCategory("debug"));
+```
+
+`WithCategories` overrides the categories of the job, `WithCategory` adds to them.
+
+The attributes that define a job (`[SimpleJob]`, `[DryJob]`, `[ShortRunJob]`, `[InProcess]` and the other attributes deriving from `JobConfigBaseAttribute`) have a `Categories` property, so the same thing can be expressed with attributes:
+
+```cs
+[SimpleJob(RuntimeMoniker.Net80, Categories = ["runtimes", "net8"])]
+[SimpleJob(RuntimeMoniker.Net90, Categories = ["runtimes", "net9"])]
+public class Benchmarks { /* ... */ }
+```
+
+`Categories` is a plain settable property, so the collection expression above can be written as `new[] { "runtimes", "net9" }` on the older language versions (C# 7.3 is still the default for `net472` and `netstandard2.0` projects).
+
+The mutator attributes (`[WarmupCount]`, `[IterationCount]`, `[RunOncePerIteration]` and the others deriving from `JobMutatorConfigBaseAttribute`) don't define a job of their own, so they have no `Categories` property. A mutator that carries categories has to be built with the fluent api: `Job.Default.WithWarmupCount(3).WithCategory("ci").AsMutator()`.
+
+Categories don't affect how a job is executed: they are not a part of the job `Id`, the folder names, nor the summary.
+
+To run only the jobs which belong to given categories, use `JobCategoryFilter`, `[JobCategoryFilter]` or the `--anyJobCategories` console argument:
+
+```cs
+var config = DefaultConfig.Instance.AddFilter(new JobCategoryFilter(["net8"]));
+```
+
+```cs
+[JobCategoryFilter("net8")]
+public class Benchmarks { /* ... */ }
+```
+
+```log
+dotnet run -c Release -- --anyJobCategories net8
+```
+
+Like `--anyCategories` and `--allCategories`, the filter is inclusion only: a job with no categories belongs to none of the requested ones, so it is filtered out. If your config mixes categorized and uncategorized jobs, selecting a category also removes the uncategorized jobs, so give a category to every job you may want to keep.
+
 ### Environment
 
 `Environment` specifies an environment of the job. You can specify the following characteristics:
@@ -70,7 +114,7 @@ If you want to change the accuracy level, you should use the following character
 * `MaxRelativeError`, `MaxAbsoluteError`: Maximum acceptable error for a benchmark (by default, BenchmarkDotNet continue iterations until the actual error is less than the specified error). *In these two characteristics*, the error means half of 99.9% confidence interval. `MaxAbsoluteError` is an absolute `TimeInterval`; doesn't have a default value. `MaxRelativeError` defines max acceptable (`(<half of CI 99.9%>) / Mean`).
 * `MinIterationTime`: Minimum time of a single iteration. Unlike `Run.IterationTime`, this characteristic specifies only the lower limit. In case of need, BenchmarkDotNet can increase this value.
 * `MinInvokeCount`:  Minimum about of target method invocation. Default value if `4` but you can decrease this value for cases when single invocations takes a lot of time.
-* `EvaluateOverhead`: if your benchmark method takes nanoseconds, BenchmarkDotNet overhead can significantly affect measurements. If this characteristic is enabled, the overhead will be evaluated and subtracted from the result measurements. Default value is `true`.
+* `EvaluateOverhead`: if your benchmark method takes nanoseconds, BenchmarkDotNet overhead can significantly affect measurements. If this characteristic is enabled, the overhead will be evaluated and subtracted from the result measurements. Default value is `false`.
 * `WithOutlierMode`: sometimes you could have outliers in your measurements. Usually these are unexpected outliers which arose because of other processes activities. By default (`OutlierMode.RemoveUpper`), all upper outliers (which is larger than Q3) will be removed from the result measurements. However, some of benchmarks have *expected* outliers. In these situation, you expect that some of invocation can produce outliers measurements (e.g. in case of network activities, cache operations, and so on). If you want to see result statistics with these outliers, you should use `OutlierMode.DontRemove`. If you can also choose `OutlierMode.RemoveLower` (outliers which are smaller than Q1 will be removed) or `OutlierMode.RemoveAll` (all outliers will be removed). See also: @BenchmarkDotNet.Mathematics.OutlierMode
 * `AnalyzeLaunchVariance`: this characteristic makes sense only if `Run.LaunchCount` is default. If this mode is enabled and, BenchmarkDotNet will try to perform several launches and detect if there is a variance between launches. If this mode is disable, only one launch will be performed.
 
@@ -98,20 +142,20 @@ public class MyBenchmarks
     {
         public Config()
         {
-            Add(
-                new Job("MySuperJob", RunMode.Dry, EnvMode.RyuJitX64)
+            AddJob(
+                new Job("MySuperJob", RunMode.Dry, EnvironmentMode.RyuJitX64)
                 {
-                    Env = { Runtime = Runtime.Core },
+                    Environment = { Runtime = CoreRuntime.Core90 },
                     Run = { LaunchCount = 5, IterationTime = TimeInterval.Millisecond * 200 },
-                    Accuracy = { MaxStdErrRelative = 0.01 }
+                    Accuracy = { MaxRelativeError = 0.01 }
                 });
 
             // The same, using the .With() factory methods:
-            Add(
+            AddJob(
                 Job.Dry
                 .WithPlatform(Platform.X64)
                 .WithJit(Jit.RyuJit)
-                .WithRuntime(Runtime.Core)
+                .WithRuntime(CoreRuntime.Core90)
                 .WithLaunchCount(5)
                 .WithIterationTime(TimeInterval.Millisecond * 200)
                 .WithMaxRelativeError(0.01)
@@ -122,26 +166,26 @@ public class MyBenchmarks
 }
 ```
 
-Basically, it's a good idea to start with predefined values (e.g. `EnvMode.RyuJitX64` and `RunMode.Dry` passed as constructor args) and modify rest of the properties using property setters or with help of object initializer syntax.
+Basically, it's a good idea to start with predefined values (e.g. `EnvironmentMode.RyuJitX64` and `RunMode.Dry` passed as constructor args) and modify rest of the properties using property setters or with help of object initializer syntax.
 
 Note that the job cannot be modified after it's added into config. Trying to set a value on property of the frozen job will throw an `InvalidOperationException`. Use the `Job.Frozen` property to determine if the code properties can be altered.
 
 If you do want to create a new job based on frozen one (all predefined job values are frozen) you can use the `.With()` extension method
 
 ```cs
-            var newJob = Job.Dry.With(Platform.X64);
+            var newJob = Job.Dry.WithPlatform(Platform.X64);
 ```
 
 or pass the frozen value as a constructor argument
 
 ```c#
-            var newJob = new Job(Job.Dry) { Env = { Platform = Platform.X64 } };
+            var newJob = new Job(Job.Dry) { Environment = { Platform = Platform.X64 } };
 ```
 
 or use the `.Apply()` method on unfrozen job
 
 ```c#
-            var newJob = new Job() { Env = { Platform = Platform.X64 } }.Apply(Job.Dry);
+            var newJob = new Job() { Environment = { Platform = Platform.X64 } }.Apply(Job.Dry);
 ```
 
 in any case the Id property will not be transfered and you must pass it explicitly (using the .ctor id argument or the `.WithId()` extension method).
@@ -152,7 +196,9 @@ You can also add new jobs via attributes. Examples:
 
 ```cs
 [DryJob]
-[ClrJob, CoreJob, MonoJob]
+[MonoJob]
+[SimpleJob(RuntimeMoniker.Net90)]
+[SimpleJob(RuntimeMoniker.NetCoreApp31)]
 [LegacyJitX86Job, LegacyJitX64Job, RyuJitX64Job]
 [SimpleJob(RunStrategy.ColdStart, launchCount: 1, warmupCount: 5, iterationCount: 5, id: "FastAndDirtyJob")]
 public class MyBenchmarkClass
@@ -212,7 +258,7 @@ public class MySuperJobAttribute : Attribute, IConfigSource
     {
         var job = new Job("MySuperJob", RunMode.Core);
         job.Env.Platform = Platform.X64;
-        Config = ManualConfig.CreateEmpty().With(job);
+        Config = ManualConfig.CreateEmpty().AddJob(job);
     }
 
     public IConfig Config { get; }

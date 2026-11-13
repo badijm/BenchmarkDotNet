@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Characteristics;
+using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
 using JetBrains.Annotations;
 
@@ -19,7 +17,7 @@ namespace BenchmarkDotNet.Exporters.Csv
         private static readonly Lazy<MeasurementColumn[]> Columns = new Lazy<MeasurementColumn[]>(BuildColumns);
 
         private readonly CsvSeparator separator;
-        public CsvMeasurementsExporter(CsvSeparator separator, SummaryStyle style = null)
+        public CsvMeasurementsExporter(CsvSeparator separator, SummaryStyle? style = null)
         {
             this.separator = separator;
             Style = style ?? SummaryStyle.Default;
@@ -35,26 +33,26 @@ namespace BenchmarkDotNet.Exporters.Csv
 
         [PublicAPI] public static Job[] GetJobs(Summary summary) => summary.BenchmarksCases.Select(b => b.Job).ToArray();
 
-        public override void ExportToLog(Summary summary, ILogger logger)
+        public override async ValueTask ExportAsync(Summary summary, CancelableStreamWriter writer, CancellationToken cancellationToken)
         {
             string realSeparator = Separator;
             var columns = GetColumns(summary);
-            logger.WriteLine(string.Join(realSeparator, columns.Select(c => CsvHelper.Escape(c.Title, realSeparator))));
+            await writer.WriteLineAsync(string.Join(realSeparator, columns.Select(c => CsvHelper.Escape(c.Title, realSeparator))), cancellationToken).ConfigureAwait(false);
 
             foreach (var report in summary.Reports)
             {
                 foreach (var measurement in report.AllMeasurements)
                 {
-                    for (int i = 0; i < columns.Length; )
+                    for (int i = 0; i < columns.Length;)
                     {
-                        logger.Write(CsvHelper.Escape(columns[i].GetValue(summary, report, measurement), realSeparator));
+                        await writer.WriteAsync(CsvHelper.Escape(columns[i].GetValue(summary, report, measurement), realSeparator), cancellationToken).ConfigureAwait(false);
 
                         if (++i < columns.Length)
                         {
-                            logger.Write(realSeparator);
+                            await writer.WriteAsync(realSeparator, cancellationToken).ConfigureAwait(false);
                         }
                     }
-                    logger.WriteLine();
+                    await writer.WriteLineAsync(cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -69,7 +67,7 @@ namespace BenchmarkDotNet.Exporters.Csv
                 new MeasurementColumn("Gen_0", (_, report, __) => report.GcStats.Gen0Collections.ToString(summary.GetCultureInfo())),
                 new MeasurementColumn("Gen_1", (_, report, __) => report.GcStats.Gen1Collections.ToString(summary.GetCultureInfo())),
                 new MeasurementColumn("Gen_2", (_, report, __) => report.GcStats.Gen2Collections.ToString(summary.GetCultureInfo())),
-                new MeasurementColumn("Allocated_Bytes", (_, report, __) => report.GcStats.GetBytesAllocatedPerOperation(report.BenchmarkCase).ToString(summary.GetCultureInfo()))
+                new MeasurementColumn("Allocated_Bytes", (_, report, __) => report.GcStats.GetBytesAllocatedPerOperation(report.BenchmarkCase)?.ToString(summary.GetCultureInfo()) ?? MetricColumn.UnknownRepresentation)
             };
 
             return columns.ToArray();
@@ -81,7 +79,7 @@ namespace BenchmarkDotNet.Exporters.Csv
             var columns = new List<MeasurementColumn>
             {
                 new MeasurementColumn("Target", (summary, report, m) => report.BenchmarkCase.Descriptor.Type.Name + "." + report.BenchmarkCase.Descriptor.WorkloadMethodDisplayInfo),
-                new MeasurementColumn("Target_Namespace", (summary, report, m) => report.BenchmarkCase.Descriptor.Type.Namespace),
+                new MeasurementColumn("Target_Namespace", (summary, report, m) => report.BenchmarkCase.Descriptor.Type.Namespace ?? ""),
                 new MeasurementColumn("Target_Type", (summary, report, m) => report.BenchmarkCase.Descriptor.Type.Name),
                 new MeasurementColumn("Target_Method", (summary, report, m) => report.BenchmarkCase.Descriptor.WorkloadMethodDisplayInfo)
             };

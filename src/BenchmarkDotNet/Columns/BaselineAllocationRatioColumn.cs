@@ -1,11 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
-using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.Columns
 {
@@ -29,7 +25,7 @@ namespace BenchmarkDotNet.Columns
                 return "NA";
 
             var cultureInfo = summary.GetCultureInfo();
-            var ratioStyle = summary?.Style?.RatioStyle ?? RatioStyle.Value;
+            var ratioStyle = summary.Style.RatioStyle;
 
             bool advancedPrecision = IsNonBaselinesPrecise(summary, baselineMetrics, benchmarkCase);
             switch (ratioStyle)
@@ -57,14 +53,15 @@ namespace BenchmarkDotNet.Columns
 
         private static bool IsNonBaselinesPrecise(Summary summary, IReadOnlyDictionary<string, Metric> baselineMetric, BenchmarkCase benchmarkCase)
         {
-            string logicalGroupKey = summary.GetLogicalGroupKey(benchmarkCase);
+            var logicalGroupKey = summary.GetLogicalGroupKey(benchmarkCase);
             var nonBaselines = summary.GetNonBaselines(logicalGroupKey);
-            return nonBaselines.Any(c => GetAllocationRatio(summary[c].Metrics, baselineMetric) is > 0 and < 0.01);
+
+            return nonBaselines.Any(c => GetAllocationRatio(summary[c]!.Metrics, baselineMetric) is > 0 and < 0.01);
         }
 
         private static double? GetAllocationRatio(
-            IReadOnlyDictionary<string, Metric>? current,
-            IReadOnlyDictionary<string, Metric>? baseline)
+            IReadOnlyDictionary<string, Metric> current,
+            IReadOnlyDictionary<string, Metric> baseline)
         {
             double? currentBytes = GetAllocatedBytes(current);
             double? baselineBytes = GetAllocatedBytes(baseline);
@@ -78,9 +75,9 @@ namespace BenchmarkDotNet.Columns
             return currentBytes / baselineBytes;
         }
 
-        private static double? GetAllocatedBytes(IReadOnlyDictionary<string, Metric>? metrics)
+        private static double? GetAllocatedBytes(IReadOnlyDictionary<string, Metric> metrics)
         {
-            var metric = metrics?.Values.FirstOrDefault(m => m.Descriptor is AllocatedMemoryMetricDescriptor);
+            var metric = metrics.Values.FirstOrDefault(m => m.Descriptor is AllocatedMemoryMetricDescriptor);
             return metric?.Value;
         }
 

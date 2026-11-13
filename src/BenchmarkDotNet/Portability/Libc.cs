@@ -1,8 +1,10 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 
 namespace BenchmarkDotNet.Portability
 {
+#pragma warning disable CS8981 // The type name 'libc' only contains lower-cased ascii characters. Such names may become reserved for the language.
     internal static class libc
+#pragma warning restore CS8981
     {
         [DllImport(nameof(libc))]
         internal static extern int getppid();

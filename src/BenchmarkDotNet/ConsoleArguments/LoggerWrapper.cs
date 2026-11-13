@@ -1,6 +1,5 @@
-﻿using System.IO;
-using System.Text;
 using BenchmarkDotNet.Loggers;
+using System.Text;
 
 namespace BenchmarkDotNet.ConsoleArguments
 {
@@ -12,6 +11,12 @@ namespace BenchmarkDotNet.ConsoleArguments
 
         public override Encoding Encoding { get; } = Encoding.ASCII;
 
-        public override void Write(string value) => logger.WriteInfo(value);
+        public override void Write(string? value)
+        {
+            if (value is null)
+                return;
+
+            logger.WriteInfo(value);
+        }
     }
 }

@@ -1,9 +1,9 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using System.Runtime.CompilerServices;
 
 namespace BenchmarkDotNet.Samples
 {
-    [Diagnostics.Windows.Configs.InliningDiagnoser(logFailuresOnly: false, allowedNamespaces: new[] { "BenchmarkDotNet.Samples" })]
+    [Diagnostics.Windows.Configs.InliningDiagnoser(logFailuresOnly: false, allowedNamespaces: ["BenchmarkDotNet.Samples"])]
     public class IntroInliningDiagnoser
     {
         [Benchmark]

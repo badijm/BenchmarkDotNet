@@ -1,4 +1,4 @@
-﻿using BenchmarkDotNet.Reports;
+using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using JetBrains.Annotations;
 
@@ -11,7 +11,7 @@ namespace BenchmarkDotNet.Columns
         public string Id => nameof(LogicalGroupColumn);
         public string ColumnName => Column.LogicalGroup;
 
-        public string GetValue(Summary summary, BenchmarkCase benchmarkCase) => summary.GetLogicalGroupKey(benchmarkCase);
+        public string GetValue(Summary summary, BenchmarkCase benchmarkCase) => summary.GetLogicalGroupKey(benchmarkCase) ?? "";
         public string GetValue(Summary summary, BenchmarkCase benchmarkCase, SummaryStyle style) => GetValue(summary, benchmarkCase);
         public bool IsDefault(Summary summary, BenchmarkCase benchmarkCase) => false;
         public bool IsAvailable(Summary summary) => true;

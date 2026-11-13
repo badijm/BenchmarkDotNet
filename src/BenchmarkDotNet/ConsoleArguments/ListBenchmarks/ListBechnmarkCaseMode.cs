@@ -1,4 +1,4 @@
-﻿namespace BenchmarkDotNet.ConsoleArguments.ListBenchmarks
+namespace BenchmarkDotNet.ConsoleArguments.ListBenchmarks
 {
     public enum ListBenchmarkCaseMode
     {
@@ -15,6 +15,11 @@
         /// <summary>
         /// Prints tree of the available full benchmark names.
         /// </summary>
-        Tree
+        Tree,
+
+        /// <summary>
+        /// Prints JSON of the available benchmark information.
+        /// </summary>
+        Json,
     }
 }

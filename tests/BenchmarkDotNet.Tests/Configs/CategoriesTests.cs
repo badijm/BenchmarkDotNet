@@ -1,11 +1,7 @@
-using System;
-using System.Linq;
-using System.Reflection;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Running;
-using Xunit;
-using Xunit.Abstractions;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Tests.Configs
 {
@@ -102,11 +98,11 @@ namespace BenchmarkDotNet.Tests.Configs
             {
                 public string[] GetCategories(MethodInfo method)
                 {
-                    return new[]
-                    {
+                    return
+                    [
                         "PermanentCategory",
                         method.Name.Substring(0, 1)
-                    };
+                    ];
                 }
             }
 

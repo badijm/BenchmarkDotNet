@@ -1,12 +1,10 @@
-using System;
-using System.Linq;
-using System.Reflection;
 using BenchmarkDotNet.Characteristics;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
-using BenchmarkDotNet.Toolchains.CsProj;
-using Xunit;
+using BenchmarkDotNet.Toolchains;
+using BenchmarkDotNet.Toolchains.Framework;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Tests.Configs
 {
@@ -60,11 +58,11 @@ namespace BenchmarkDotNet.Tests.Configs
             Assert.False(j.Environment.Gc.AllowVeryLargeObjects);
             Assert.Equal(Platform.AnyCpu, j.Environment.Platform);
             Assert.Equal(RunStrategy.Throughput, j.Run.RunStrategy); // set by default
-            Assert.Equal("Default", j.Id); // id reset
-            Assert.True(j.DisplayInfo == "DefaultJob", "DisplayInfo = " + j.DisplayInfo);
-            Assert.True(j.ResolvedId == "DefaultJob", "ResolvedId = " + j.ResolvedId);
+            Assert.Equal("CustomId", j.Id); // id remains after unfreeze
+            Assert.Equal("CustomId", j.DisplayInfo);
+            Assert.Equal("CustomId", j.ResolvedId);
             Assert.Equal(j.ResolvedId, j.FolderInfo);
-            Assert.Equal("Default", j.Environment.Id);
+            Assert.Equal("CustomId", j.Environment.Id); // id remains after unfreeze
 
             // new job
             j = new Job(j.Freeze());
@@ -160,7 +158,7 @@ namespace BenchmarkDotNet.Tests.Configs
             // 4. Freeze-unfreeze:
             j = j.Freeze().UnfreezeCopy();
 
-            Assert.Equal("Platform=X86, LaunchCount=1", j.Id);
+            Assert.Equal("SomeId", j.Id); // id not lost
             Assert.Equal(Platform.X86, j.Environment.Platform);
             Assert.Equal(1, j.Run.LaunchCount);
 
@@ -204,15 +202,15 @@ namespace BenchmarkDotNet.Tests.Configs
             Assert.False(j.HasValue(CharacteristicObject.IdCharacteristic));
             Assert.False(j.Environment.HasValue(CharacteristicObject.IdCharacteristic));
 
-            Job.EnvironmentCharacteristic[j] = EnvironmentMode.LegacyJitX86.UnfreezeCopy(); // id will not flow
-            Assert.False(j.HasValue(CharacteristicObject.IdCharacteristic));
-            Assert.False(j.Environment.HasValue(CharacteristicObject.IdCharacteristic));
+            Job.EnvironmentCharacteristic[j] = EnvironmentMode.LegacyJitX86.UnfreezeCopy(); // id will flow
+            Assert.True(j.HasValue(CharacteristicObject.IdCharacteristic));
+            Assert.True(j.Environment.HasValue(CharacteristicObject.IdCharacteristic));
 
             var c = new CharacteristicSet(EnvironmentMode.LegacyJitX64, RunMode.Long); // id will not flow, new CharacteristicSet
             Assert.False(c.HasValue(CharacteristicObject.IdCharacteristic));
 
-            Job.EnvironmentCharacteristic[c] = EnvironmentMode.LegacyJitX86.UnfreezeCopy(); // id will not flow
-            Assert.False(c.HasValue(CharacteristicObject.IdCharacteristic));
+            Job.EnvironmentCharacteristic[c] = EnvironmentMode.LegacyJitX86.UnfreezeCopy(); // id will flow
+            Assert.True(c.HasValue(CharacteristicObject.IdCharacteristic));
 
             CharacteristicObject.IdCharacteristic[c] = "MyId"; // id set explicitly
             Assert.Equal("MyId", c.Id);
@@ -221,12 +219,12 @@ namespace BenchmarkDotNet.Tests.Configs
             Assert.Equal("MyId", j.Id);
             Assert.Equal("MyId", j.Environment.Id);
 
-            Job.EnvironmentCharacteristic[j] = EnvironmentMode.LegacyJitX86.UnfreezeCopy(); // id will not flow
-            Assert.Equal("MyId", j.Id);
-            Assert.Equal("MyId", j.Environment.Id);
+            Job.EnvironmentCharacteristic[j] = EnvironmentMode.LegacyJitX86.UnfreezeCopy();
+            Assert.Equal("LegacyJitX86", j.Id);
+            Assert.Equal("LegacyJitX86", j.Environment.Id);
 
-            j = j.WithJit(Jit.RyuJit);  // custom id will flow
-            Assert.Equal("MyId", j.Id);
+            j = j.WithJit(Jit.RyuJit);
+            Assert.Equal("LegacyJitX86", j.Id);
         }
 
         [Fact]
@@ -332,7 +330,7 @@ namespace BenchmarkDotNet.Tests.Configs
                         }
                     });
             AssertProperties(set1, "LaunchCount=2, Platform=X86");
-            Assert.Equal(Platform.X86, Job.EnvironmentCharacteristic[set1].Platform);
+            Assert.Equal(Platform.X86, Job.EnvironmentCharacteristic[set1]!.Platform);
             Assert.True(set1.HasValue(Job.EnvironmentCharacteristic));
             Assert.Equal(Platform.X86, EnvironmentMode.PlatformCharacteristic[set1]);
 
@@ -392,7 +390,7 @@ namespace BenchmarkDotNet.Tests.Configs
 
             a = InfrastructureMode.ToolchainCharacteristic;
             // will not throw:
-            a[j] = CsProjClassicNetToolchain.Net462;
+            a[j] = CsProjFrameworkToolchain.Net472;
             a[j] = null;
             a[j] = Characteristic.EmptyValue;
             Assert.Throws<ArgumentException>(() => a[j] = new EnvironmentMode()); // not assignable;
@@ -403,7 +401,7 @@ namespace BenchmarkDotNet.Tests.Configs
         [Fact]
         public static void MutatorAppliedToOtherJobOverwritesOnlyTheConfiguredSettings()
         {
-            var jobBefore = Job.Default.WithRuntime(CoreRuntime.Core30); // this is a default job with Runtime set to Core
+            var jobBefore = Job.Default.WithRuntime(CoreRuntime.Core80); // this is a default job with Runtime set to Core
             var copy = jobBefore.UnfreezeCopy();
 
             Assert.False(copy.HasValue(RunMode.MaxIterationCountCharacteristic));
@@ -415,7 +413,7 @@ namespace BenchmarkDotNet.Tests.Configs
             Assert.True(copy.HasValue(RunMode.MaxIterationCountCharacteristic));
             Assert.Equal(20, copy.Run.MaxIterationCount);
             Assert.False(jobBefore.HasValue(RunMode.MaxIterationCountCharacteristic));
-            Assert.True(copy.Environment.Runtime is CoreRuntime);
+            Assert.True(copy.GetRuntime() is CoreRuntime);
             Assert.False(copy.Meta.IsMutator); // the job does not became a mutator itself, this config should not be copied
         }
 
@@ -441,37 +439,17 @@ namespace BenchmarkDotNet.Tests.Configs
         }
 
         [Fact]
-        public static void WithNuGet()
+        public static void UnfreezeCopy_PreservesIdCharacteristic()
         {
-            var j = new Job("SomeId");
+            // Arrange
+            var original = new Job();
+            original.SetValue(Job.IdCharacteristic, "TestID");
 
-            //.WithNuGet extensions
+            // Act
+            var copy = original.UnfreezeCopy();
 
-            j = j.Freeze().WithNuGet("Newtonsoft.Json");
-            Assert.Equal(1, j.Infrastructure.NuGetReferences.Count);
-
-            j = j.WithNuGet("AutoMapper", "7.0.1");
-            Assert.Collection(j.Infrastructure.NuGetReferences,
-                reference => Assert.Equal(new NuGetReference("AutoMapper", "7.0.1"), reference),
-                reference => Assert.Equal(new NuGetReference("Newtonsoft.Json", ""), reference));
-
-            Assert.Throws<ArgumentException>(() => j = j.WithNuGet("AutoMapper")); //adding is an error, since it's the same package
-            Assert.Throws<ArgumentException>(() => j = j.WithNuGet("AutoMapper", "7.0.0-alpha-0001")); //adding is an error, since it's the same package
-
-            j = j.WithNuGet("NLog", "4.5.10"); // ensure we can add at the end of a non-empty list
-            Assert.Collection(j.Infrastructure.NuGetReferences,
-                reference => Assert.Equal(new NuGetReference("AutoMapper", "7.0.1"), reference),
-                reference => Assert.Equal(new NuGetReference("Newtonsoft.Json", ""), reference),
-                reference => Assert.Equal(new NuGetReference("NLog", "4.5.10"), reference));
-
-            var expected = new NuGetReferenceList(Array.Empty<NuGetReference>())
-            {
-                new NuGetReference("AutoMapper", "7.0.1"),
-                new NuGetReference("Newtonsoft.Json", ""),
-                new NuGetReference("NLog", "4.5.10"),
-            };
-
-            Assert.Equal(expected, j.Infrastructure.NuGetReferences); // ensure that the list's equality operator returns true when the contents are the same
+            // Assert
+            Assert.Equal("TestID", copy.GetValue(Job.IdCharacteristic));
         }
 
         private static bool IsSubclassOfobModeOfItself(Type type)

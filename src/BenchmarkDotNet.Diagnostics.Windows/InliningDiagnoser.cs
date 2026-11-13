@@ -1,5 +1,3 @@
-﻿using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Running;
@@ -13,8 +11,8 @@ namespace BenchmarkDotNet.Diagnostics.Windows
 
         private readonly bool logFailuresOnly = true;
         private readonly bool filterByNamespace = true;
-        private readonly string[] allowedNamespaces = null;
-        private string defaultNamespace;
+        private readonly string[]? allowedNamespaces = null;
+        private string defaultNamespace = default!;
 
         // ReSharper disable once EmptyConstructor parameterless ctor is mandatory for DiagnosersLoader.CreateDiagnoser
         public InliningDiagnoser() { }
@@ -35,14 +33,14 @@ namespace BenchmarkDotNet.Diagnostics.Windows
         /// </summary>
         /// <param name="logFailuresOnly">only the methods that failed to get inlined. True by default.</param>
         /// <param name="allowedNamespaces">list of namespaces from which inlining message should be print.</param>
-        public InliningDiagnoser(bool logFailuresOnly = true, string[] allowedNamespaces = null)
+        public InliningDiagnoser(bool logFailuresOnly = true, string[]? allowedNamespaces = null)
         {
             this.logFailuresOnly = logFailuresOnly;
             this.allowedNamespaces = allowedNamespaces;
             this.filterByNamespace = true;
         }
 
-        public override IEnumerable<string> Ids => new[] { nameof(InliningDiagnoser) };
+        public override IEnumerable<string> Ids => [nameof(InliningDiagnoser)];
 
         public string ShortName => "inlining";
 
@@ -102,7 +100,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
 
         private bool ShouldPrintEventInfo(string inlinerNamespace, string inlineeNamespace)
             => !filterByNamespace ||
-                (allowedNamespaces?.Any(x=> inlineeNamespace.StartsWith(x) || inlinerNamespace.StartsWith(x))
+                (allowedNamespaces?.Any(x => inlineeNamespace.StartsWith(x) || inlinerNamespace.StartsWith(x))
                     ?? (inlinerNamespace.StartsWith(defaultNamespace)) || inlineeNamespace.StartsWith(defaultNamespace));
     }
 }

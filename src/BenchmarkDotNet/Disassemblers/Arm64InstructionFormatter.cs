@@ -1,6 +1,5 @@
-﻿using Gee.External.Capstone.Arm64;
+using Gee.External.Capstone.Arm64;
 using Iced.Intel;
-using System.Collections.Generic;
 using System.Text;
 
 namespace BenchmarkDotNet.Disassemblers
@@ -12,17 +11,23 @@ namespace BenchmarkDotNet.Disassemblers
         internal static string Format(Arm64Asm asm, FormatterOptions formatterOptions,
             bool printInstructionAddresses, uint pointerSize, IReadOnlyDictionary<ulong, string> symbols)
         {
-            StringBuilder output = new ();
-            Arm64Instruction instruction = asm.Instruction;
+            var instruction = asm.Instruction;
+            if (instruction == null)
+                return "";
+
+            StringBuilder output = new();
 
             if (printInstructionAddresses)
             {
                 FormatInstructionPointer(instruction, formatterOptions, pointerSize, output);
             }
 
-            output.Append(instruction.Mnemonic.ToString().PadRight(formatterOptions.FirstOperandCharIndex));
+            var padRight = instruction.Details.Operands.Length > 0
+                ? Math.Max(formatterOptions.FirstOperandCharIndex, instruction.Mnemonic.Length + 1)
+                : 0;
+            output.Append(instruction.Mnemonic.PadRight(padRight));
 
-            if (asm.ReferencedAddress.HasValue && !asm.IsReferencedAddressIndirect && symbols.TryGetValue(asm.ReferencedAddress.Value, out string name))
+            if (asm.ReferencedAddress.HasValue && !asm.IsReferencedAddressIndirect && symbols.TryGetValue(asm.ReferencedAddress.Value, out var name))
             {
                 string partToReplace = $"#0x{asm.ReferencedAddress.Value:x}";
                 output.Append(instruction.Operand.Replace(partToReplace, name));

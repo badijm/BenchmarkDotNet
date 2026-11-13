@@ -33,11 +33,11 @@ How to troubleshoot the build process:
 
 1. Run the benchmarks with `--logBuildOutput` command line argument.
 2. Read the error message. If it does not contain the answer to your problem, please continue to the next step.
-3. Go to the build artifacts folder (path printed by BDN).
+3. Re-run with `--keepFiles` and go to the build artifacts folder (path printed by BDN at the end of the run).
 4. The folder should contain: 
-   * a file with source code (ends with `.notcs` to make sure IDE don't include it in other projects by default)
-   * a project file (`.csproj`)
-   * a script file (`.bat` on Windows, `.sh` for other OSes) which should be doing exactly the same thing as BDN does:
+   * a file with source code (`gen.cs`)
+   * a project file (`gen.csproj`)
+   * a script file (`build.bat` on Windows, `build.sh` for other OSes) which should be doing exactly the same thing as BDN does:
      * dotnet restore
      * dotnet build (with some parameters like `-c Release`)
 5. Run the script, read the error message. From here you continue with the troubleshooting like it was a project in your solution.
@@ -45,7 +45,7 @@ How to troubleshoot the build process:
 The recommended order of solving build issues:
 
 1. Change the right settings in your project file which defines benchmarks to get it working.
-2. Customize the `Job` settings using available options like `job.WithCustomBuildConfiguration($name)`or `job.With(new Argument[] { new MsBuildArgument("/p:SomeProperty=Value")})`.
+2. Customize the `Job` settings using available options like `job.WithCustomBuildConfiguration($name)` or `job.WithArguments(new Argument[] { new MsBuildArgument("/p:SomeProperty=Value") })`. For list-like MSBuild properties that contain special characters (for example, `DefineConstants=TEST1;TEST2`), use `MsBuildProperty` (it escapes the value for you): `job.WithArguments(new Argument[] { new MsBuildProperty("DefineConstants", "TEST1", "TEST2") })`.
 3. Implement your own `IToolchain` and generate and build all the right things in your way (you can use existing Builders and Generators and just override some methods to change specific behaviour).
 4. Report a bug in BenchmarkDotNet repository.
 
@@ -94,4 +94,3 @@ public void Setup()
 ### One of the above, but with a Debug build
 
 By default, BDN builds everything in Release. But debugging Release builds even with full symbols might be non-trivial. To enforce BDN to build the benchmark in Debug please use `DebugBuildConfig` and then attach the debugger.
-

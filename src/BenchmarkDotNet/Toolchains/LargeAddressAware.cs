@@ -1,6 +1,3 @@
-﻿using System;
-using System.IO;
-
 namespace BenchmarkDotNet.Toolchains
 {
     // From https://github.com/KirillOsenkov/LargeAddressAware/blob/95e5fc6024438f94325df4bac6ef73c77bf90e71/SetLargeAddressAware/LargeAddressAware.cs
@@ -14,7 +11,7 @@ namespace BenchmarkDotNet.Toolchains
                 var value = binaryReader.ReadInt16();
                 if ((value & 0x20) == 0)
                 {
-                    value = (short)(value | 0x20);
+                    value = (short) (value | 0x20);
                     stream.Position -= 2;
                     var binaryWriter = new BinaryWriter(stream);
                     binaryWriter.Write(value);

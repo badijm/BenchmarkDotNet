@@ -1,4 +1,3 @@
-﻿using System;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
 using JetBrains.Annotations;
@@ -17,7 +16,7 @@ namespace BenchmarkDotNet.Attributes
         /// defines a new VeryLongRun Job that targets specified Framework
         /// </summary>
         /// <param name="runtimeMoniker">Target Framework to test.</param>
-        public VeryLongRunJobAttribute(RuntimeMoniker runtimeMoniker)
+        public VeryLongRunJobAttribute(string runtimeMoniker)
             : base(GetJob(Job.VeryLongRun, runtimeMoniker, null, null))
         {
         }
@@ -28,7 +27,7 @@ namespace BenchmarkDotNet.Attributes
         /// <param name="runtimeMoniker">Target Framework to test.</param>
         /// <param name="jit">Jit to test.</param>
         /// <param name="platform">Platform to test.</param>
-        public VeryLongRunJobAttribute(RuntimeMoniker runtimeMoniker, Jit jit, Platform platform)
+        public VeryLongRunJobAttribute(string runtimeMoniker, Jit jit, Platform platform)
             : base(GetJob(Job.VeryLongRun, runtimeMoniker, jit, platform))
         {
         }

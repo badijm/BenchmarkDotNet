@@ -1,5 +1,3 @@
-﻿using System;
-using System.Runtime.CompilerServices;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Environments;
@@ -7,6 +5,7 @@ using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Order;
 using BenchmarkDotNet.Toolchains.InProcess;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
+using System.Runtime.CompilerServices;
 
 namespace BenchmarkDotNet.Samples
 {
@@ -26,7 +25,7 @@ namespace BenchmarkDotNet.Samples
                 AddJob(Job.MediumRun
                     .WithLaunchCount(1)
                     .WithPlatform(wrongPlatform)
-                    .WithToolchain(InProcessEmitToolchain.Instance)
+                    .WithToolchain(InProcessEmitToolchain.Default)
                     .WithId("InProcess"));
 
                 AddValidator(InProcessValidator.DontFailOnError);

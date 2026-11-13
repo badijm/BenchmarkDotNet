@@ -1,5 +1,3 @@
-﻿using System;
-using System.Threading;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
 

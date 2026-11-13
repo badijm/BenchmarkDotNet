@@ -1,4 +1,3 @@
-﻿using System.Threading;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Order;

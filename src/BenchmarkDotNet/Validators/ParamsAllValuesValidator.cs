@@ -1,9 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Extensions;
+using System.Diagnostics.CodeAnalysis;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Validators
 {
@@ -15,16 +13,15 @@ namespace BenchmarkDotNet.Validators
 
         private ParamsAllValuesValidator() { }
 
-        private const BindingFlags ReflectionFlags = BindingFlags.Static | BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-        public IEnumerable<ValidationError> Validate(ValidationParameters input) =>
+        public IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters input) =>
             input.Benchmarks
                 .Select(benchmark => benchmark.Descriptor.Type)
                 .Distinct()
-                .SelectMany(type => type.GetTypeMembersWithGivenAttribute<ParamsAllValuesAttribute>(ReflectionFlags))
+                .SelectMany(type => type.GetTypeMembersWithGivenAttribute<ParamsAllValuesAttribute>(ReflectionExtensions.ParameterMemberFlags))
                 .Distinct()
                 .Select(member => GetErrorOrDefault(member.ParameterType))
-                .Where(error => error != null);
+                .WhereNotNull()
+                .ToAsyncEnumerable();
 
         private bool IsBool(Type paramType) => paramType == typeof(bool);
         private bool IsEnum(Type paramType) => paramType.GetTypeInfo().IsEnum;
@@ -33,17 +30,17 @@ namespace BenchmarkDotNet.Validators
             var typeInfo = paramType.GetTypeInfo();
             return typeInfo.IsEnum && typeInfo.IsDefined(typeof(FlagsAttribute));
         }
-        private bool IsNullable(Type paramType, out Type underlyingType)
+        private bool IsNullable(Type paramType, [NotNullWhen(true)] out Type? underlyingType)
         {
             underlyingType = Nullable.GetUnderlyingType(paramType);
             return underlyingType != null;
         }
 
-        private ValidationError GetErrorOrDefault(Type parameterType)
+        private ValidationError? GetErrorOrDefault(Type parameterType)
         {
             switch (parameterType)
             {
-                case Type t when IsNullable(t, out Type underType):
+                case Type t when IsNullable(t, out var underType):
                     return GetErrorOrDefault(underType);
 
                 case Type t when IsFlagsEnum(t):

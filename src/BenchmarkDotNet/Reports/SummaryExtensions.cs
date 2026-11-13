@@ -1,10 +1,8 @@
-﻿using System.Collections.Generic;
-using System.Globalization;
-using System.Linq;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Running;
 using JetBrains.Annotations;
+using System.Globalization;
 
 namespace BenchmarkDotNet.Reports
 {
@@ -25,7 +23,7 @@ namespace BenchmarkDotNet.Reports
 
         public static IEnumerable<BenchmarkCase> GetLogicalGroupForBenchmark(this Summary summary, BenchmarkCase benchmarkCase)
         {
-            string logicalGroupKey = summary.GetLogicalGroupKey(benchmarkCase);
+            string? logicalGroupKey = summary.GetLogicalGroupKey(benchmarkCase);
             return summary.BenchmarksCases.Where(b => summary.GetLogicalGroupKey(b) == logicalGroupKey);
         }
 

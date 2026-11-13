@@ -1,17 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Linq;
-using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using Microsoft.Diagnostics.Tracing.Etlx;
 using Microsoft.Diagnostics.Tracing.Parsers.Kernel;
 using Microsoft.Diagnostics.Tracing.Stacks;
+using Perfolizer.Metrology;
+using System.Diagnostics.CodeAnalysis;
 using Address = System.UInt64;
 
 namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
@@ -38,12 +36,12 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
             this.benchmarkCase = benchmarkCase;
             this.logger = logger;
 
-            moduleName = programName;
-            functionNames = new[]
-            {
+            moduleName = programName.ToLowerInvariant();
+            functionNames =
+            [
                 nameof(EngineParameters.WorkloadActionUnroll),
                 nameof(EngineParameters.WorkloadActionNoUnroll)
-            };
+            ];
         }
 
         public IEnumerable<Metric> Parse()
@@ -95,14 +93,14 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
             var heapParser = new HeapTraceProviderTraceEventParser(eventSource);
             // We index by heap address and then within the heap we remember the allocation stack
             var heaps = new Dictionary<Address, Dictionary<Address, long>>();
-            Dictionary<Address, long> lastHeapAllocs = null;
+            Dictionary<Address, long>? lastHeapAllocs = null;
 
             Address lastHeapHandle = 0;
 
             long nativeLeakSize = 0;
             long totalAllocation = 0;
 
-            heapParser.HeapTraceAlloc += delegate(HeapAllocTraceData data)
+            heapParser.HeapTraceAlloc += delegate (HeapAllocTraceData data)
             {
                 if (!start)
                 {
@@ -117,7 +115,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
                     return;
                 }
 
-                var allocs = lastHeapAllocs;
+                var allocs = lastHeapAllocs!;
                 if (data.HeapHandle != lastHeapHandle)
                 {
                     allocs = CreateHeapCache(data.HeapHandle, heaps, ref lastHeapAllocs, ref lastHeapHandle);
@@ -152,14 +150,14 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
                 }
             };
 
-            heapParser.HeapTraceFree += delegate(HeapFreeTraceData data)
+            heapParser.HeapTraceFree += delegate (HeapFreeTraceData data)
             {
                 if (!start)
                 {
                     return;
                 }
 
-                var allocs = lastHeapAllocs;
+                var allocs = lastHeapAllocs!;
                 if (data.HeapHandle != lastHeapHandle)
                 {
                     allocs = CreateHeapCache(data.HeapHandle, heaps, ref lastHeapAllocs, ref lastHeapHandle);
@@ -173,7 +171,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
                 }
             };
 
-            heapParser.HeapTraceReAlloc += delegate(HeapReallocTraceData data)
+            heapParser.HeapTraceReAlloc += delegate (HeapReallocTraceData data)
             {
                 if (!start)
                 {
@@ -187,7 +185,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
                     return;
                 }
 
-                var allocs = lastHeapAllocs;
+                var allocs = lastHeapAllocs!;
                 if (data.HeapHandle != lastHeapHandle)
                 {
                     allocs = CreateHeapCache(data.HeapHandle, heaps, ref lastHeapAllocs, ref lastHeapHandle);
@@ -210,7 +208,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
                 }
             };
 
-            heapParser.HeapTraceDestroy += delegate(HeapTraceData data)
+            heapParser.HeapTraceDestroy += delegate (HeapTraceData data)
             {
                 if (!start)
                 {
@@ -218,7 +216,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
                 }
 
                 // Heap is dying, kill all objects in it.
-                var allocs = lastHeapAllocs;
+                var allocs = lastHeapAllocs!;
                 if (data.HeapHandle != lastHeapHandle)
                 {
                     allocs = CreateHeapCache(data.HeapHandle, heaps, ref lastHeapAllocs, ref lastHeapHandle);
@@ -240,18 +238,26 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
             if (totalOperation == 0)
             {
                 logger.WriteLine($"Something went wrong. The trace file {etlFilePath} does not contain BenchmarkDotNet engine events.");
-                return Enumerable.Empty<Metric>();
+                return [];
             }
 
             var memoryAllocatedPerOperation = totalAllocation / totalOperation;
             var memoryLeakPerOperation = nativeLeakSize / totalOperation;
 
-            logger.WriteLine($"Native memory allocated per single operation: {SizeValue.FromBytes(memoryAllocatedPerOperation).ToString(SizeUnit.B, benchmarkCase.Config.CultureInfo)}");
+            logger.WriteLine(
+                $"Native memory allocated per single operation: " +
+                $"{UnitHelper.Format(
+                    SizeValue.FromBytes(memoryAllocatedPerOperation).ToMeasurement(SizeUnit.B),
+                    formatProvider: benchmarkCase.Config.CultureInfo)}");
             logger.WriteLine($"Count of allocated object: {countOfAllocatedObject / totalOperation}");
 
             if (nativeLeakSize != 0)
             {
-                logger.WriteLine($"Native memory leak per single operation: {SizeValue.FromBytes(memoryLeakPerOperation).ToString(SizeUnit.B, benchmarkCase.Config.CultureInfo)}");
+                logger.WriteLine(
+                    $"Native memory leak per single operation: " +
+                    $"{UnitHelper.Format(
+                        SizeValue.FromBytes(memoryLeakPerOperation).ToMeasurement(SizeUnit.B),
+                        formatProvider: benchmarkCase.Config.CultureInfo)}");
             }
 
             var heapInfoList = heaps.Select(h => new { Address = h.Key, h.Value.Count, types = h.Value.Values });
@@ -260,20 +266,24 @@ namespace BenchmarkDotNet.Diagnostics.Windows.Tracing
                 logger.WriteLine($"Count of not deallocated object: {item.Count / totalOperation}");
             }
 
-            return new[]
-            {
-                new Metric(new AllocatedNativeMemoryDescriptor(), memoryAllocatedPerOperation),
-                new Metric(new NativeMemoryLeakDescriptor(), memoryLeakPerOperation)
-            };
+            return
+            [
+                new Metric(AllocatedNativeMemoryDescriptor.Instance, memoryAllocatedPerOperation),
+                new Metric(NativeMemoryLeakDescriptor.Instance, memoryLeakPerOperation)
+            ];
         }
 
-        private static Dictionary<Address, long> CreateHeapCache(Address heapHandle, Dictionary<Address, Dictionary<Address, long>> heaps, ref Dictionary<Address, long> lastHeapAllocs, ref Address lastHeapHandle)
+        private static Dictionary<Address, long> CreateHeapCache(
+            Address heapHandle,
+            Dictionary<Address, Dictionary<Address, long>> heaps,
+            ref Dictionary<Address, long>? lastHeapAllocs,
+            ref Address lastHeapHandle)
         {
             Dictionary<Address, long> ret;
 
             if (!heaps.TryGetValue(heapHandle, out ret))
             {
-                ret = new Dictionary<Address, long>();
+                ret = [];
                 heaps.Add(heapHandle, ret);
             }
 

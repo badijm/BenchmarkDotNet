@@ -1,10 +1,7 @@
-﻿using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Reports;
 using JetBrains.Annotations;
 using Perfolizer.Mathematics.OutlierDetection;
-using Xunit;
 
 namespace BenchmarkDotNet.Tests.Engine
 {
@@ -31,7 +28,7 @@ namespace BenchmarkDotNet.Tests.Engine
         [AssertionMethod]
         private static void CheckResults(int expectedResultCount, List<Measurement> measurements, OutlierMode outlierMode)
         {
-            Assert.Equal(expectedResultCount, new RunResults(measurements, outlierMode, default, default, 0).GetWorkloadResultMeasurements().Count());
+            Assert.Equal(expectedResultCount, new RunResults(measurements, outlierMode, default).GetWorkloadResultMeasurements().Count());
         }
 
         private static void Add(List<Measurement> measurements, int time)

@@ -1,7 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Mathematics;
 using BenchmarkDotNet.Reports;
@@ -10,48 +6,31 @@ using Perfolizer.Mathematics.OutlierDetection;
 
 namespace BenchmarkDotNet.Engines
 {
-    public struct RunResults
+    public readonly struct RunResults(IReadOnlyList<Measurement> engineMeasurements, OutlierMode outlierMode, GcStats gcStats)
     {
-        private readonly OutlierMode outlierMode;
+        private readonly OutlierMode outlierMode = outlierMode;
 
         [PublicAPI]
-        public IReadOnlyList<Measurement> EngineMeasurements { get; }
+        public IReadOnlyList<Measurement>? EngineMeasurements { get; } = engineMeasurements;
 
         [PublicAPI]
         public IReadOnlyList<Measurement>? Overhead
             => EngineMeasurements
-                .Where(m => m.Is(IterationMode.Overhead, IterationStage.Actual))
+                ?.Where(m => m.Is(IterationMode.Overhead, IterationStage.Actual))
                 .ToArray();
 
         [PublicAPI]
-        public IReadOnlyList<Measurement> Workload
+        public IReadOnlyList<Measurement>? Workload
             => EngineMeasurements
-                .Where(m => m.Is(IterationMode.Workload, IterationStage.Actual))
+                ?.Where(m => m.Is(IterationMode.Workload, IterationStage.Actual))
                 .ToArray();
 
-        public GcStats GCStats { get; }
-
-        public ThreadingStats ThreadingStats { get; }
-
-        public double ExceptionFrequency { get; }
-
-        public RunResults(IReadOnlyList<Measurement> engineMeasurements,
-            OutlierMode outlierMode,
-            GcStats gcStats,
-            ThreadingStats threadingStats,
-            double exceptionFrequency)
-        {
-            this.outlierMode = outlierMode;
-            EngineMeasurements = engineMeasurements;
-            GCStats = gcStats;
-            ThreadingStats = threadingStats;
-            ExceptionFrequency = exceptionFrequency;
-        }
+        public GcStats GCStats { get; } = gcStats;
 
         public IEnumerable<Measurement> GetWorkloadResultMeasurements()
         {
-            var overheadActualMeasurements = Overhead ?? Array.Empty<Measurement>();
-            var workloadActualMeasurements = Workload;
+            var overheadActualMeasurements = Overhead ?? [];
+            var workloadActualMeasurements = Workload ?? [];
             if (workloadActualMeasurements.IsEmpty())
                 yield break;
 
@@ -78,25 +57,21 @@ namespace BenchmarkDotNet.Engines
 
         public IEnumerable<Measurement> GetAllMeasurements()
         {
-            foreach (var measurement in EngineMeasurements)
+            foreach (var measurement in EngineMeasurements ?? [])
                 yield return measurement;
             foreach (var measurement in GetWorkloadResultMeasurements())
                 yield return measurement;
         }
 
-        public void Print(TextWriter outWriter)
+        internal void Print(IHost host)
         {
             foreach (var measurement in GetWorkloadResultMeasurements())
-                outWriter.WriteLine(measurement.ToString());
+                host.WriteLine(measurement.ToString());
 
             if (!GCStats.Equals(GcStats.Empty))
-                outWriter.WriteLine(GCStats.ToOutputLine());
-            if (!ThreadingStats.Equals(ThreadingStats.Empty))
-                outWriter.WriteLine(ThreadingStats.ToOutputLine());
-            if (ExceptionFrequency > 0)
-                outWriter.WriteLine(ExceptionsStats.ToOutputLine(ExceptionFrequency));
+                host.WriteLine(GCStats.ToOutputLine());
 
-            outWriter.WriteLine();
+            host.WriteLine();
         }
 
         // TODO: improve

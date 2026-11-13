@@ -1,8 +1,6 @@
-﻿using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Extensions;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Validators
 {
@@ -14,7 +12,7 @@ namespace BenchmarkDotNet.Validators
 
         public bool TreatsWarningsAsErrors => true; // it is a must!
 
-        public IEnumerable<ValidationError> Validate(ValidationParameters input)
+        public IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters input)
         {
             var validationErrors = new List<ValidationError>();
 
@@ -25,10 +23,34 @@ namespace BenchmarkDotNet.Validators
                 validationErrors.AddRange(ValidateAttributes<GlobalSetupAttribute>(groupByType.Key.Name, allMethods));
                 validationErrors.AddRange(ValidateAttributes<GlobalCleanupAttribute>(groupByType.Key.Name, allMethods));
                 validationErrors.AddRange(ValidateAttributes<IterationSetupAttribute>(groupByType.Key.Name, allMethods));
-                validationErrors.AddRange(ValidateAttributes<IterationSetupAttribute>(groupByType.Key.Name, allMethods));
+                validationErrors.AddRange(ValidateAttributes<IterationCleanupAttribute>(groupByType.Key.Name, allMethods));
+
+                validationErrors.AddRange(ValidateReturnType<GlobalSetupAttribute>(groupByType.Key.Name, allMethods));
+                validationErrors.AddRange(ValidateReturnType<GlobalCleanupAttribute>(groupByType.Key.Name, allMethods));
+                validationErrors.AddRange(ValidateReturnType<IterationSetupAttribute>(groupByType.Key.Name, allMethods));
+                validationErrors.AddRange(ValidateReturnType<IterationCleanupAttribute>(groupByType.Key.Name, allMethods));
             }
 
-            return validationErrors;
+            return validationErrors.ToAsyncEnumerable();
+        }
+
+        private IEnumerable<ValidationError> ValidateReturnType<T>(string benchmarkClassName, IEnumerable<MethodInfo> allMethods) where T : Attribute
+        {
+            foreach (var method in allMethods)
+            {
+                // The dual-shaped (awaitable AND async-enumerable) case is owned by
+                // AwaitableAsyncEnumerableAmbiguityValidator — skip it here so the same method does not
+                // produce two errors at once. The runtime awaits dual-shaped returns instead of rejecting
+                // them, which matches that validator's warning-not-error severity.
+                if (method.GetCustomAttributes(false).OfType<T>().Any()
+                    && method.ReturnType.IsAsyncEnumerable(out _)
+                    && !method.ReturnType.IsAwaitable(out _))
+                {
+                    yield return new ValidationError(
+                        TreatsWarningsAsErrors,
+                        $"[{typeof(T).Name}] method {benchmarkClassName}.{method.Name} returns an async enumerable, which is not supported.");
+                }
+            }
         }
 
         private IEnumerable<ValidationError> ValidateAttributes<T>(string benchmarkClassName, IEnumerable<MethodInfo> allMethods) where T : TargetedAttribute

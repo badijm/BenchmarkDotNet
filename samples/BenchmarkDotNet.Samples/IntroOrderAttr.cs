@@ -1,10 +1,9 @@
-﻿using System.Threading;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Order;
 
 namespace BenchmarkDotNet.Samples
 {
-    [Orderer(SummaryOrderPolicy.FastestToSlowest, MethodOrderPolicy.Declared)]
+    [Orderer(SummaryOrderPolicy.FastestToSlowest, MethodOrderPolicy.Declared, jobOrderPolicy: JobOrderPolicy.Numeric)]
     [DryJob]
     public class IntroOrderAttr
     {

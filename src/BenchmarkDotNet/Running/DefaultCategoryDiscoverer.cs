@@ -1,8 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using BenchmarkDotNet.Attributes;
+using System.Reflection;
 
 namespace BenchmarkDotNet.Running
 {
@@ -28,7 +25,7 @@ namespace BenchmarkDotNet.Running
                 attributes.AddRange(type.GetTypeInfo().Assembly.GetCustomAttributes().OfType<BenchmarkCategoryAttribute>());
             }
             if (attributes.Count == 0)
-                return Array.Empty<string>();
+                return [];
             return attributes.SelectMany(attr => attr.Categories).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         }
     }

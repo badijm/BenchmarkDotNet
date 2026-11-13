@@ -1,6 +1,5 @@
-﻿using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
-using System;
 
 namespace BenchmarkDotNet.Attributes
 {
@@ -9,6 +8,10 @@ namespace BenchmarkDotNet.Attributes
     {
         public IConfig Config { get; }
 
-        public ExceptionDiagnoserAttribute() => Config = ManualConfig.CreateEmpty().AddDiagnoser(ExceptionDiagnoser.Default);
+        /// <param name="displayExceptionsIfZeroValue">Display Exceptions column. True by default.</param>
+        public ExceptionDiagnoserAttribute(bool displayExceptionsIfZeroValue = true)
+        {
+            Config = ManualConfig.CreateEmpty().AddDiagnoser(new ExceptionDiagnoser(new ExceptionDiagnoserConfig(displayExceptionsIfZeroValue)));
+        }
     }
 }

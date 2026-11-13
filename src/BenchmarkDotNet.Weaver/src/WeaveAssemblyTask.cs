@@ -1,0 +1,229 @@
+// *****
+// If any changes are made to this file, increment the WeaverVersionSuffix in the common.props file,
+// then run `build.cmd pack-weaver`.
+// *****
+
+using AsmResolver.DotNet;
+using AsmResolver.PE.DotNet.Metadata.Tables;
+using AsmResolver.PE.DotNet.StrongName;
+using Microsoft.Build.Framework;
+
+namespace BenchmarkDotNet.Weaver;
+
+/// <summary>
+/// The Task used by MSBuild to weave the assembly.
+/// </summary>
+public sealed class WeaveAssemblyTask : Microsoft.Build.Utilities.Task
+{
+    /// <summary>
+    /// The path of the target assembly.
+    /// </summary>
+    [Required]
+    public required string TargetAssembly { get; set; }
+
+    /// <summary>
+    /// The reference paths to search for assembly resolution.
+    /// </summary>
+    [Required]
+    public required string[] ReferencePaths { get; set; }
+
+    /// <summary>
+    /// Whether to treat warnings as errors.
+    /// </summary>
+    public bool TreatWarningsAsErrors { get; set; }
+
+    /// <summary>
+    /// Whether the compiler strong named the assembly.
+    /// </summary>
+    public bool SignAssembly { get; set; }
+
+    /// <summary>
+    /// The key the compiler strong named the assembly with. Weaving invalidates the signature it produced,
+    /// so the assembly has to be signed again with the same key.
+    /// </summary>
+    public string? AssemblyOriginatorKeyFile { get; set; }
+
+    /// <summary>
+    /// Whether only the public key was available to the compiler, leaving the signature to be written after
+    /// the build. There is then no signature for weaving to invalidate.
+    /// </summary>
+    public bool DelaySign { get; set; }
+
+    /// <summary>
+    /// Whether the assembly carries a public key without ever being signed with the matching private one.
+    /// There is then no signature for weaving to invalidate.
+    /// </summary>
+    public bool PublicSign { get; set; }
+
+    /// <summary>
+    /// Runs the weave assembly task.
+    /// </summary>
+    /// <returns><see langword="true"/> if successful; <see langword="false"/> otherwise.</returns>
+    public override bool Execute()
+    {
+        if (!File.Exists(TargetAssembly))
+        {
+            Log.LogError($"TargetAssembly does not exist: {TargetAssembly}");
+            return false;
+        }
+
+        bool benchmarkMethodsImplAdjusted = false;
+        try
+        {
+            var module = ModuleDefinition.FromFile(TargetAssembly, createRuntimeContext: false);
+            var runtimeContext = new RuntimeContext(module.OriginalTargetRuntime, new PathAssemblyResolver(ReferencePaths));
+            runtimeContext.AddAssembly(module.Assembly!);
+
+            bool anyAdjustments = false;
+            foreach (var type in module.GetAllTypes())
+            {
+                if (type.CustomAttributes.Any(attr => attr.Constructor!.DeclaringType!.FullName == "BenchmarkDotNet.Attributes.CompilerServices.AggressivelyOptimizeMethodsAttribute"))
+                {
+                    ApplyAggressiveOptimizationToMethods(type);
+
+                    void ApplyAggressiveOptimizationToMethods(TypeDefinition type)
+                    {
+                        // Apply AggressiveOptimization to all methods in the type and nested types that
+                        // aren't annotated with NoOptimization (this includes compiler-generated state machines).
+                        foreach (var method in type.Methods)
+                        {
+                            if ((method.ImplAttributes & MethodImplAttributes.NoOptimization) == 0)
+                            {
+                                var oldImpl = method.ImplAttributes;
+                                method.ImplAttributes |= MethodImplAttributes.AggressiveOptimization;
+                                anyAdjustments |= (oldImpl & MethodImplAttributes.AggressiveOptimization) == 0;
+                            }
+                        }
+
+                        // Recurse into nested types
+                        foreach (var nested in type.NestedTypes)
+                        {
+                            ApplyAggressiveOptimizationToMethods(nested);
+                        }
+                    }
+                }
+
+                // We can skip non-public types as they are not valid for benchmarks.
+                // !type.IsNotPublic handles nested types, while type.IsPublic does not.
+                if (!type.IsNotPublic)
+                {
+                    foreach (var method in type.Methods)
+                    {
+                        if (method.CustomAttributes.Any(a => IsBenchmarkAttribute(a, runtimeContext)))
+                        {
+                            var oldImpl = method.ImplAttributes;
+                            // Remove AggressiveInlining and add NoInlining.
+                            method.ImplAttributes = (oldImpl & ~MethodImplAttributes.AggressiveInlining) | MethodImplAttributes.NoInlining;
+                            benchmarkMethodsImplAdjusted |= (oldImpl & MethodImplAttributes.NoInlining) == 0;
+                            anyAdjustments |= benchmarkMethodsImplAdjusted;
+                        }
+                    }
+                }
+            }
+
+            if (anyAdjustments)
+            {
+                var signer = GetStrongNameSigner(module);
+
+                // Write to a memory stream before overwriting the original file in case an exception occurs during the write (like unsupported platform).
+                // https://github.com/Washi1337/AsmResolver/issues/640
+                var memoryStream = new MemoryStream();
+                try
+                {
+                    module.Write(memoryStream);
+                    SignStrongName(memoryStream, module, signer);
+                    using var fileStream = new FileStream(TargetAssembly, FileMode.Truncate, FileAccess.Write);
+                    memoryStream.WriteTo(fileStream);
+                }
+                catch (OutOfMemoryException)
+                {
+                    // If there is not enough memory, fallback to write to null stream then write to file.
+                    memoryStream.Dispose();
+                    memoryStream = null;
+                    GC.Collect();
+                    module.Write(Stream.Null);
+                    module.Write(TargetAssembly);
+
+                    if (signer is not null)
+                    {
+                        using var fileStream = new FileStream(TargetAssembly, FileMode.Open, FileAccess.ReadWrite);
+                        SignStrongName(fileStream, module, signer);
+                    }
+                }
+                finally
+                {
+                    memoryStream?.Dispose();
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            if (TreatWarningsAsErrors)
+            {
+                Log.LogError($"Assembly weaving failed. Benchmark methods found requiring NoInlining: {benchmarkMethodsImplAdjusted}.");
+                Log.LogErrorFromException(e, true, true, null);
+            }
+            else
+            {
+                Log.LogWarning($"Assembly weaving failed. Benchmark methods found requiring NoInlining: {benchmarkMethodsImplAdjusted}. Error:{Environment.NewLine}{e}");
+            }
+        }
+        return !Log.HasLoggedErrors;
+    }
+
+    /// <summary>
+    /// Rewriting the assembly invalidates the signature the compiler wrote, so it has to be signed again with
+    /// the same key. Returns null when there is no signature to restore, or no key to restore it with.
+    /// </summary>
+    private StrongNameSigner? GetStrongNameSigner(ModuleDefinition module)
+    {
+        // Delay and public signing leave the signature to be written after the build, and an assembly the
+        // compiler did not sign has none in the first place.
+        if (!SignAssembly || DelaySign || PublicSign || module.Assembly?.PublicKey is null)
+            return null;
+
+        if (string.IsNullOrEmpty(AssemblyOriginatorKeyFile) || !File.Exists(AssemblyOriginatorKeyFile))
+        {
+            LogStrongNameWarning("the key it was signed with was not passed to the weaver");
+            return null;
+        }
+
+        try
+        {
+            return new StrongNameSigner(StrongNamePrivateKey.FromFile(AssemblyOriginatorKeyFile!));
+        }
+        catch (Exception e)
+        {
+            // A key container or a public-key-only file cannot sign, and neither can a file we cannot read.
+            LogStrongNameWarning($"the key it was signed with could not be read: {e.Message}");
+            return null;
+        }
+    }
+
+    private void LogStrongNameWarning(string reason)
+        => Log.LogWarning(
+            $"Weaving invalidated the strong name signature of {Path.GetFileName(TargetAssembly)}, because {reason}. " +
+            "The assembly will fail strong name verification. Set BenchmarkDotNetShouldWeaveAssemblies to false to opt out of weaving.");
+
+    private static void SignStrongName(Stream imageStream, ModuleDefinition module, StrongNameSigner? signer)
+    {
+        if (signer is null)
+            return;
+
+        imageStream.Position = 0;
+        signer.SignImage(imageStream, module.Assembly!.HashAlgorithm);
+    }
+
+    private static bool IsBenchmarkAttribute(CustomAttribute attribute, RuntimeContext runtimeContext)
+    {
+        // BenchmarkAttribute is unsealed, so we need to walk its hierarchy.
+        for (var attr = attribute.Constructor!.DeclaringType; attr != null; attr = attr.Resolve(runtimeContext).BaseType)
+        {
+            if (attr.FullName == "BenchmarkDotNet.Attributes.BenchmarkAttribute")
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+}

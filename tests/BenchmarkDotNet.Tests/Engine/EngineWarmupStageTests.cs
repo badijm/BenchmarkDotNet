@@ -1,5 +1,3 @@
-﻿using System;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Engines;
@@ -7,8 +5,6 @@ using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Mocks;
 using Perfolizer.Horology;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.Tests.Engine
 {
@@ -16,7 +12,7 @@ namespace BenchmarkDotNet.Tests.Engine
     {
         private const int MinIterationCount = EngineResolver.DefaultMinWarmupIterationCount;
         private const int MaxIterationCount = EngineResolver.DefaultMaxWarmupIterationCount;
-        private const int MaxOverheadIterationCount = DefaultStoppingCriteriaFactory.MaxOverheadIterationCount;
+        private const int MaxOverheadIterationCount = EngineWarmupStage.MaxOverheadIterationCount;
 
         private readonly ITestOutputHelper output;
 
@@ -34,25 +30,25 @@ namespace BenchmarkDotNet.Tests.Engine
         [Fact]
         public void AutoTest_InfiniteIncrease()
         {
-            AutoTest(data => TimeInterval.Millisecond * data.Index, MaxIterationCount);
+            AutoTest(data => TimeInterval.Millisecond * data.index, MaxIterationCount);
         }
 
         [Fact]
         public void AutoTest_Alternation()
         {
-            AutoTest(data => TimeInterval.Millisecond * (data.Index % 2), MinIterationCount, MaxIterationCount);
+            AutoTest(data => TimeInterval.Millisecond * (data.index % 2), MinIterationCount, MaxIterationCount);
         }
 
         [Fact]
         public void AutoTest_TenSteps()
         {
-            AutoTest(data => TimeInterval.Millisecond * Math.Max(0, 10 - data.Index), 10, MaxIterationCount);
+            AutoTest(data => TimeInterval.Millisecond * Math.Max(0, 10 - data.index), 10, MaxIterationCount);
         }
 
         [Fact]
         public void AutoTest_WithoutSteadyStateOverhead()
         {
-            AutoTest(data => TimeInterval.Millisecond * data.Index, MaxOverheadIterationCount, mode: IterationMode.Overhead);
+            AutoTest(data => TimeInterval.Millisecond * data.index, MaxOverheadIterationCount, mode: IterationMode.Overhead);
         }
 
         [Fact]
@@ -70,7 +66,7 @@ namespace BenchmarkDotNet.Tests.Engine
             Assert.Equal(2, mergedJob.Run.MinWarmupIterationCount);
             Assert.Equal(4, mergedJob.Run.MaxWarmupIterationCount);
 
-            AutoTest(data => TimeInterval.Millisecond * (data.Index % 2), 2, 4, job: mergedJob);
+            AutoTest(data => TimeInterval.Millisecond * (data.index % 2), 2, 4, job: mergedJob);
         }
 
         [MinWarmupCount(2, forceAutoWarmup: true)]
@@ -81,21 +77,19 @@ namespace BenchmarkDotNet.Tests.Engine
             public void Method() { }
         }
 
-        private void AutoTest(Func<IterationData, TimeInterval> measure, int min, int max = -1, IterationMode mode = IterationMode.Workload, Job job = null)
+        private void AutoTest(Func<IterationData, TimeInterval> measure, int min, int max = -1, IterationMode mode = IterationMode.Workload, Job? job = null)
         {
             if (max == -1)
                 max = min;
-            var stage = CreateStage(job ?? Job.Default, measure);
-            var measurements = stage.Run(1, mode, 1, RunStrategy.Throughput);
+            job ??= Job.Default;
+            var engine = new MockEngine(output, job, measure);
+            var stage = mode == IterationMode.Overhead
+                ? EngineWarmupStage.GetOverhead(1, 1, engine.Parameters)
+                : EngineWarmupStage.GetWorkload(RunStrategy.Throughput, 1, 1, engine.Parameters);
+            var measurements = engine.Run(stage);
             int count = measurements.Count;
             output.WriteLine($"MeasurementCount = {count} (Min= {min}, Max = {max})");
             Assert.InRange(count, min, max);
-        }
-
-        private EngineWarmupStage CreateStage(Job job, Func<IterationData, TimeInterval> measure)
-        {
-            var engine = new MockEngine(output, job, measure);
-            return new EngineWarmupStage(engine);
         }
     }
 }

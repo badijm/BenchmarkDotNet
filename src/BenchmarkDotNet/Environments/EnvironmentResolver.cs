@@ -1,4 +1,3 @@
-﻿using System;
 using BenchmarkDotNet.Characteristics;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Jobs;
@@ -16,14 +15,14 @@ namespace BenchmarkDotNet.Environments
         private EnvironmentResolver()
         {
             Register(EnvironmentMode.PlatformCharacteristic, RuntimeInformation.GetCurrentPlatform);
-            Register(EnvironmentMode.RuntimeCharacteristic, RuntimeInformation.GetCurrentRuntime);
-            Register(EnvironmentMode.JitCharacteristic, RuntimeInformation.GetCurrentJit);
+            Register(EnvironmentMode.JitCharacteristic, JitInfo.GetCurrentJit);
             Register(EnvironmentMode.AffinityCharacteristic, RuntimeInformation.GetCurrentAffinity);
             Register(EnvironmentMode.EnvironmentVariablesCharacteristic, Array.Empty<EnvironmentVariable>);
             Register(EnvironmentMode.PowerPlanModeCharacteristic, () => PowerManagementApplier.Map(PowerPlan.HighPerformance));
 
             // TODO: find a better place
             Register(AccuracyMode.AnalyzeLaunchVarianceCharacteristic, () => false);
+            Register(RunMode.ConsumeTasksSynchronouslyCharacteristic, () => false);
             Register(RunMode.UnrollFactorCharacteristic, job =>
             {
                 // TODO: move it to another place and use the main resolver

@@ -1,5 +1,4 @@
-﻿using BenchmarkDotNet.Exporters.Csv;
-using Xunit;
+using BenchmarkDotNet.Exporters.Csv;
 
 namespace BenchmarkDotNet.Tests
 {

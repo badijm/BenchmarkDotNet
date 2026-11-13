@@ -1,46 +1,60 @@
-﻿using BenchmarkDotNet.Analysers;
+using BenchmarkDotNet.Analysers;
+using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using JetBrains.Annotations;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 
 namespace BenchmarkDotNet.Diagnosers
 {
-    public class ExceptionDiagnoser : IDiagnoser
+    public class ExceptionDiagnoser(ExceptionDiagnoserConfig config) : IInProcessDiagnoser
     {
-        public static readonly ExceptionDiagnoser Default = new ExceptionDiagnoser();
+        public static readonly ExceptionDiagnoser Default = new(new ExceptionDiagnoserConfig(displayExceptionsIfZeroValue: true));
 
-        private ExceptionDiagnoser() { }
+        private readonly Dictionary<BenchmarkCase, long> results = [];
 
-        public IEnumerable<string> Ids => new[] { nameof(ExceptionDiagnoser) };
+        public ExceptionDiagnoserConfig Config { get; } = config;
 
-        public IEnumerable<IExporter> Exporters => Array.Empty<IExporter>();
+        public IEnumerable<string> Ids => [nameof(ExceptionDiagnoser)];
 
-        public IEnumerable<IAnalyser> Analysers => Array.Empty<IAnalyser>();
+        public IEnumerable<IExporter> Exporters => [];
+
+        public IEnumerable<IAnalyser> Analysers => [];
 
         public void DisplayResults(ILogger logger) { }
 
-        public RunMode GetRunMode(BenchmarkCase benchmarkCase) => RunMode.NoOverhead;
+        public RunMode GetRunMode(BenchmarkCase benchmarkCase) => RunMode.ExtraIteration;
 
-        public void Handle(HostSignal signal, DiagnoserActionParameters parameters) { }
+        [MethodImpl(CodeGenHelper.AggressiveOptimizationOption)]
+        public ValueTask HandleAsync(HostSignal signal, DiagnoserActionParameters parameters, CancellationToken cancellationToken) => new();
 
-        public IEnumerable<Metric> ProcessResults(DiagnoserResults results)
+        public IEnumerable<Metric> ProcessResults(DiagnoserResults diagnoserResults)
         {
-            yield return new Metric(ExceptionsFrequencyMetricDescriptor.Instance, results.ExceptionFrequency);
+            if (results.TryGetValue(diagnoserResults.BenchmarkCase, out var exceptionsCount))
+            {
+                double totalOperations = diagnoserResults.Measurements.First(m => m.IterationStage == IterationStage.Extra).Operations;
+                yield return new Metric(new ExceptionsFrequencyMetricDescriptor(Config), exceptionsCount / totalOperations);
+            }
         }
 
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters) => Enumerable.Empty<ValidationError>();
+        public IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters) => AsyncEnumerable.Empty<ValidationError>();
 
-        private class ExceptionsFrequencyMetricDescriptor : IMetricDescriptor
+        void IInProcessDiagnoser.DeserializeResults(BenchmarkCase benchmarkCase, string serializedResults)
+            => results.Add(benchmarkCase, long.Parse(serializedResults));
+
+        InProcessDiagnoserHandlerData IInProcessDiagnoser.GetHandlerData(BenchmarkCase benchmarkCase)
+            => new(typeof(ExceptionDiagnoserInProcessHandler), null);
+
+        internal class ExceptionsFrequencyMetricDescriptor(ExceptionDiagnoserConfig config) : IMetricDescriptor
         {
-            internal static readonly IMetricDescriptor Instance = new ExceptionsFrequencyMetricDescriptor();
-
             public string Id => "ExceptionFrequency";
             public string DisplayName => Column.Exceptions;
             public string Legend => "Exceptions thrown per single operation";
@@ -49,6 +63,41 @@ namespace BenchmarkDotNet.Diagnosers
             public string Unit => "Count";
             public bool TheGreaterTheBetter => false;
             public int PriorityInCategory => 0;
+            public bool GetIsAvailable(Metric metric)
+                => config?.DisplayExceptionsIfZeroValue == true || metric.Value > 0;
+        }
+    }
+
+    [UsedImplicitly]
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public sealed class ExceptionDiagnoserInProcessHandler : IInProcessDiagnoserHandler
+    {
+        private long exceptionsCount;
+
+        [MethodImpl(CodeGenHelper.AggressiveOptimizationOption)]
+        ValueTask IInProcessDiagnoserHandler.HandleAsync(BenchmarkSignal signal, InProcessDiagnoserActionArgs args, CancellationToken cancellationToken)
+        {
+            switch (signal)
+            {
+                case BenchmarkSignal.BeforeExtraIteration:
+                    AppDomain.CurrentDomain.FirstChanceException += OnFirstChanceException;
+                    break;
+                case BenchmarkSignal.AfterExtraIteration:
+                    AppDomain.CurrentDomain.FirstChanceException -= OnFirstChanceException;
+                    break;
+            }
+            return new();
+        }
+
+        void IInProcessDiagnoserHandler.Initialize(string? serializedConfig) { }
+
+        string IInProcessDiagnoserHandler.SerializeResults()
+            => exceptionsCount.ToString();
+
+        [MethodImpl(CodeGenHelper.AggressiveOptimizationOption)]
+        private void OnFirstChanceException(object? sender, FirstChanceExceptionEventArgs e)
+        {
+            Interlocked.Increment(ref exceptionsCount);
         }
     }
 }

@@ -1,7 +1,5 @@
-using System;
-using System.Diagnostics.CodeAnalysis;
 using BenchmarkDotNet.Jobs;
-using Xunit;
+using System.Diagnostics.CodeAnalysis;
 
 namespace BenchmarkDotNet.Tests.Configs
 {
@@ -13,7 +11,7 @@ namespace BenchmarkDotNet.Tests.Configs
             var job = new Job()
                 .WithEnvironmentVariables(new EnvironmentVariable("a", "b"))
                 .WithEnvironmentVariables(new EnvironmentVariable("c", "d"));
-            Assert.Equal(1, job.Environment.EnvironmentVariables.Count);
+            Assert.Single(job.Environment.EnvironmentVariables);
         }
 
         [Fact]
@@ -54,9 +52,9 @@ namespace BenchmarkDotNet.Tests.Configs
         [SuppressMessage("ReSharper", "AssignNullToNotNullAttribute")]
         public void InvalidVariables()
         {
-            Assert.Throws<ArgumentNullException>(() => new EnvironmentVariable(null, "x"));
-            Assert.Throws<ArgumentNullException>(() => new EnvironmentVariable("x", null));
-            Assert.Throws<ArgumentNullException>(() => new EnvironmentVariable(null, null));
+            Assert.Throws<ArgumentNullException>(() => new EnvironmentVariable(null!, "x"));
+            Assert.Throws<ArgumentNullException>(() => new EnvironmentVariable("x", null!));
+            Assert.Throws<ArgumentNullException>(() => new EnvironmentVariable(null!, null!));
         }
 
         [Fact]

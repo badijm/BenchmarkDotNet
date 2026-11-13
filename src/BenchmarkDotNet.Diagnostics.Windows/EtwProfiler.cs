@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.IO;
-using System.Linq;
-using System.Threading;
 using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Diagnostics.Windows.Tracing;
@@ -16,6 +10,7 @@ using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
 using JetBrains.Annotations;
 using Microsoft.Diagnostics.Tracing.Session;
+using System.Collections.Immutable;
 
 namespace BenchmarkDotNet.Diagnostics.Windows
 {
@@ -26,7 +21,9 @@ namespace BenchmarkDotNet.Diagnostics.Windows
         private readonly Dictionary<BenchmarkCase, string> benchmarkToEtlFile;
         private readonly Dictionary<BenchmarkCase, PreciseMachineCounter[]> benchmarkToCounters;
 
-        private Session kernelSession, userSession, heapSession;
+        private Session kernelSession = default!;
+        private Session userSession = default!;
+        private Session heapSession = default!;
 
         [PublicAPI] // parameterless ctor required by DiagnosersLoader to support creating this profiler via console line args
         public EtwProfiler() : this(new EtwProfilerConfig(performExtraBenchmarksRun: false)) { }
@@ -36,18 +33,18 @@ namespace BenchmarkDotNet.Diagnostics.Windows
         {
             this.config = config;
             runMode = config.PerformExtraBenchmarksRun ? RunMode.ExtraRun : RunMode.NoOverhead;
-            benchmarkToEtlFile = new Dictionary<BenchmarkCase, string>();
-            benchmarkToCounters = new Dictionary<BenchmarkCase, PreciseMachineCounter[]>();
+            benchmarkToEtlFile = [];
+            benchmarkToCounters = [];
             CreationTime = DateTime.Now;
         }
 
         public string ShortName => "ETW";
 
-        public IEnumerable<string> Ids => new[] { nameof(EtwProfiler) };
+        public IEnumerable<string> Ids => [nameof(EtwProfiler)];
 
-        public IEnumerable<IExporter> Exporters => Array.Empty<IExporter>();
+        public IEnumerable<IExporter> Exporters => [];
 
-        public IEnumerable<IAnalyser> Analysers => Array.Empty<IAnalyser>();
+        public IEnumerable<IAnalyser> Analysers => [];
 
         public IReadOnlyDictionary<BenchmarkCase, PmcStats> Results => BuildPmcStats();
 
@@ -57,33 +54,42 @@ namespace BenchmarkDotNet.Diagnostics.Windows
 
         public RunMode GetRunMode(BenchmarkCase benchmarkCase) => runMode;
 
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters)
-            => HardwareCounters.Validate(validationParameters, mandatory: false);
+        // Iterated here rather than through BenchmarkDotNet's ToAsyncEnumerable polyfill: that one is internal to
+        // BenchmarkDotNet and compiled out of its .NET 10 asset, while this assembly is netstandard2.0 and would
+        // bind the netstandard asset's copy - which a .NET 10 host then cannot load.
+        public async IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters)
+        {
+            foreach (var error in HardwareCounters.Validate(validationParameters, mandatory: false))
+            {
+                yield return error;
+            }
+        }
 
-        public void Handle(HostSignal signal, DiagnoserActionParameters parameters)
+        public ValueTask HandleAsync(HostSignal signal, DiagnoserActionParameters parameters, CancellationToken cancellationToken)
         {
             // it's crucial to start the trace before the process starts and stop it after the benchmarked process stops to have all of the necessary events in the trace file!
             if (signal == HostSignal.BeforeProcessStart)
                 Start(parameters);
             else if (signal == HostSignal.AfterProcessExit)
                 Stop(parameters);
+            return new();
         }
 
         public IEnumerable<Metric> ProcessResults(DiagnoserResults results)
         {
             if (!benchmarkToEtlFile.TryGetValue(results.BenchmarkCase, out var traceFilePath))
-                return Array.Empty<Metric>();
+                return [];
 
             // currently TraceLogParser parsers the counters metrics only. So if there are no counters configured, it makes no sense to parse the file
             if (!benchmarkToCounters.TryGetValue(results.BenchmarkCase, out var counters) || counters.IsEmpty())
-                return Array.Empty<Metric>();
+                return [];
 
             return TraceLogParser.Parse(traceFilePath, counters);
         }
 
         public void DisplayResults(ILogger logger)
         {
-            if (!benchmarkToEtlFile.Any())
+            if (benchmarkToEtlFile.Count == 0)
                 return;
 
             logger.WriteLineInfo($"Exported {benchmarkToEtlFile.Count} trace file(s). Example:");
@@ -97,7 +103,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
                 .Select(counter => HardwareCounters.FromCounter(counter, config.IntervalSelectors.TryGetValue(counter, out var selector) ? selector : GetInterval))
                 .ToArray();
 
-            if (counters.Any()) // we need to enable the counters before starting the kernel session
+            if (counters.Length != 0) // we need to enable the counters before starting the kernel session
                 HardwareCounters.Enable(counters);
 
             try
@@ -120,21 +126,10 @@ namespace BenchmarkDotNet.Diagnostics.Windows
         private void Stop(DiagnoserActionParameters parameters)
         {
             WaitForDelayedEvents();
-            string userSessionFile;
-            try
-            {
-                kernelSession.Stop();
-                heapSession?.Stop();
-                userSession.Stop();
-
-                userSessionFile = userSession.FilePath;
-            }
-            finally
-            {
-                kernelSession.Dispose();
-                heapSession?.Dispose();
-                userSession.Dispose();
-            }
+            string userSessionFile = userSession.FilePath;
+            kernelSession.Dispose();
+            heapSession?.Dispose();
+            userSession.Dispose();
 
             // Merge the 'primary' etl file X.etl (userSession) with any files that match .clr*.etl .user*.etl. and .kernel.etl.
             TraceEventSession.MergeInPlace(userSessionFile, TextWriter.Null);

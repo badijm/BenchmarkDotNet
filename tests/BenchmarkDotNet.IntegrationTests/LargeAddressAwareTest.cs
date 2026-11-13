@@ -1,15 +1,12 @@
-﻿using System;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Portability;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Loggers;
 using BenchmarkDotNet.Tests.XUnit;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -19,35 +16,57 @@ namespace BenchmarkDotNet.IntegrationTests
 
         public LargeAddressAwareTest(ITestOutputHelper outputHelper) => output = outputHelper;
 
-        [FactWindowsOnly("CLR is a valid job only on Windows")]
-        public void BenchmarkCanAllocateMoreThan2Gb()
+        [Fact]
+        public void BenchmarkCanAllocateMoreThan2Gb_Core()
         {
-            var summary = BenchmarkRunner
-                .Run<NeedsMoreThan2GB>(
-                    ManualConfig.CreateEmpty()
-                        .AddJob(Job.Dry.WithRuntime(CoreRuntime.Core70).WithPlatform(Platform.X64).WithId("Core"))
-                        .AddJob(Job.Dry.WithRuntime(ClrRuntime.Net462).WithPlatform(Platform.X86).WithGcServer(false).WithLargeAddressAware().WithId("Framework"))
-                        .AddColumnProvider(DefaultColumnProviders.Instance)
-                        .AddLogger(new OutputLogger(output)));
+            var platform = RuntimeInformation.GetCurrentPlatform();
+            var config = ManualConfig.CreateEmpty().WithBuildTimeout(TimeSpan.FromSeconds(240));
+            // Running 32-bit benchmarks with .Net Core requires passing the path to 32-bit SDK,
+            // which makes this test more complex than it's worth in CI, so we only test 64-bit.
+            config.AddJob(Job.Dry.WithRuntime(CoreRuntime.Core10_0).WithPlatform(platform).WithId(platform.ToString()));
+            config.AddColumnProvider(DefaultColumnProviders.Instance)
+                  .AddLogger(new OutputLogger(output));
+
+            var summary = BenchmarkRunner.Run<NeedsMoreThan2GB>(config);
 
             Assert.True(summary.Reports
                 .All(report => report.ExecuteResults
                 .All(executeResult => executeResult.FoundExecutable)));
 
             Assert.True(summary.Reports.All(report => report.AllMeasurements.Any()));
+            Assert.True(summary.Reports.All(report => report.ExecuteResults.Any()));
+            Assert.Equal(1, summary.Reports.Count(report => report.BenchmarkCase.GetRuntime() is CoreRuntime));
+
+            Assert.Contains(".NET 10.0", summary.AllRuntimes);
+        }
+
+        [FactEnvSpecific("Framework is only on Windows", EnvRequirement.WindowsOnly)]
+        public void BenchmarkCanAllocateMoreThan2Gb_Framework()
+        {
+            var platform = RuntimeInformation.GetCurrentPlatform();
+            var config = ManualConfig.CreateEmpty();
+            // Net481 officially only supports x86, x64, and Arm64.
+            config.AddJob(Job.Dry.WithRuntime(ClrRuntime.Net481).WithPlatform(platform).WithGcServer(false).WithLargeAddressAware().WithId(platform.ToString()));
+            int jobCount = 1;
+            if (platform == Platform.X64)
+            {
+                ++jobCount;
+                config.AddJob(Job.Dry.WithRuntime(ClrRuntime.Net472).WithPlatform(Platform.X86).WithGcServer(false).WithLargeAddressAware().WithId("X86"));
+            }
+            config.AddColumnProvider(DefaultColumnProviders.Instance)
+                  .AddLogger(new OutputLogger(output));
+
+            var summary = BenchmarkRunner.Run<NeedsMoreThan2GB>(config);
 
             Assert.True(summary.Reports
-                .Single(report => report.BenchmarkCase.Job.Environment.Runtime is ClrRuntime)
-                .ExecuteResults
-                .Any());
+                .All(report => report.ExecuteResults
+                .All(executeResult => executeResult.FoundExecutable)));
 
-            Assert.True(summary.Reports
-                .Single(report => report.BenchmarkCase.Job.Environment.Runtime is CoreRuntime)
-                .ExecuteResults
-                .Any());
+            Assert.True(summary.Reports.All(report => report.AllMeasurements.Any()));
+            Assert.True(summary.Reports.All(report => report.ExecuteResults.Any()));
+            Assert.Equal(jobCount, summary.Reports.Count(report => report.BenchmarkCase.GetRuntime() is ClrRuntime));
 
             Assert.Contains(".NET Framework", summary.AllRuntimes);
-            Assert.Contains(".NET 7.0", summary.AllRuntimes);
         }
     }
 

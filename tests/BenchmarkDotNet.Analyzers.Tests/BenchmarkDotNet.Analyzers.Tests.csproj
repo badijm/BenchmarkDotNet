@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\build\common.props" />
+  <PropertyGroup>
+    <SignAssembly>false</SignAssembly>
+    <AssemblyName>BenchmarkDotNet.Analyzers.Tests</AssemblyName>
+    <TargetFrameworks>net472;net10.0</TargetFrameworks>
+    <PreserveCompilationContext>true</PreserveCompilationContext>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <SuppressTfmSupportBuildErrors>true</SuppressTfmSupportBuildErrors>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Xunit.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Remove="BenchmarkDotNet.Analyzers.Tests.csproj.DotSettings" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.CodeFix.Testing" Version="1.1.4" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="Xunit.Combinatorial" Version="[1.6.24]" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="[2.8.2]">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- TODO: Remove this item after `Microsoft.CodeAnalysis.CSharp.Analyzer.Testing` package dependencies are updated -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Analyzers and CodeFixers are included via Directory.Build.props, but we need them as regular references for testing -->
+    <ProjectReference Include="..\..\src\BenchmarkDotNet.Analyzers\BenchmarkDotNet.Analyzers.csproj" />
+    <ProjectReference Include="..\..\src\BenchmarkDotNet.CodeFixers\BenchmarkDotNet.CodeFixers.csproj" />
+    <ProjectReference Include="..\..\src\BenchmarkDotNet\BenchmarkDotNet.csproj" />
+  </ItemGroup>
+  <Import Project="..\..\build\common.targets" />
+</Project>

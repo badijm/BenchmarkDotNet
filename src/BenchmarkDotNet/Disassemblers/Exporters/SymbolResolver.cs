@@ -1,5 +1,4 @@
-﻿using Iced.Intel;
-using System.Collections.Generic;
+using Iced.Intel;
 
 namespace BenchmarkDotNet.Disassemblers.Exporters
 {
@@ -11,7 +10,7 @@ namespace BenchmarkDotNet.Disassemblers.Exporters
 
         public bool TryGetSymbol(in Instruction instruction, int operand, int instructionOperand, ulong address, int addressSize, out SymbolResult symbol)
         {
-            if (_mappings.TryGetValue(address, out string text))
+            if (_mappings.TryGetValue(address, out var text))
             {
                 symbol = new SymbolResult(address, text);
                 return true;

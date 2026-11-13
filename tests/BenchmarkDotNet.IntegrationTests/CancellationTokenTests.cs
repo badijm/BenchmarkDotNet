@@ -1,0 +1,256 @@
+using BenchmarkDotNet.Analysers;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Diagnosers;
+using BenchmarkDotNet.Engines;
+using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.Exporters;
+using BenchmarkDotNet.IntegrationTests.Xunit;
+using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Reports;
+using BenchmarkDotNet.Running;
+using BenchmarkDotNet.Tests.Loggers;
+using BenchmarkDotNet.Tests.XUnit;
+using BenchmarkDotNet.Toolchains;
+using BenchmarkDotNet.Toolchains.InProcess.Emit;
+using BenchmarkDotNet.Toolchains.InProcess.NoEmit;
+using BenchmarkDotNet.Toolchains.Wasm;
+using BenchmarkDotNet.Validators;
+
+namespace BenchmarkDotNet.IntegrationTests;
+
+[Collection(Constants.LongRunningTests)]
+public class CancellationTokenTests(ITestOutputHelper output) : BenchmarkTestExecutor(output)
+{
+    [Fact]
+    public void BenchmarkWithCancellationTokenProperty_ReceivesToken()
+    {
+        var config = ManualConfig.CreateEmpty()
+            .AddJob(Job.Dry)
+            .AddLogger(new OutputLogger(Output));
+
+        CanExecute<BenchmarkWithCancellationToken>(config);
+    }
+
+    // GetFields hands back a hidden base field alongside the `new` one hiding it, and the token is assigned
+    // through an object initializer, where a repeated name is CS1912 - the generated code failed to build.
+    // (GetProperties collapses the pair, so only fields reach this.)
+    [Fact]
+    public void BenchmarkHidingAnInheritedCancellationTokenField_BuildsAndReceivesToken()
+    {
+        var config = ManualConfig.CreateEmpty()
+            .AddJob(Job.Dry)
+            .AddLogger(new OutputLogger(Output));
+
+        CanExecute<BenchmarkHidingCancellationTokenField>(config);
+    }
+
+    public class BenchmarkHidingCancellationTokenFieldBase
+    {
+        [BenchmarkCancellation] public CancellationToken Token;
+    }
+
+    public class BenchmarkHidingCancellationTokenField : BenchmarkHidingCancellationTokenFieldBase
+    {
+        [BenchmarkCancellation] public new CancellationToken Token;
+
+        [Benchmark]
+        public void CheckToken()
+        {
+            Assert.True(Token.CanBeCanceled);
+            Assert.False(Token.IsCancellationRequested);
+        }
+    }
+
+    [Fact]
+    public void BenchmarkWithCancellationTokenProperty_ReceivesToken_InProcessNoEmit()
+    {
+        var config = ManualConfig.CreateEmpty()
+            .AddJob(Job.Dry.WithToolchain(InProcessNoEmitToolchain.Default))
+            .AddLogger(new OutputLogger(Output));
+
+        CanExecute<BenchmarkWithCancellationToken>(config);
+    }
+
+    [Fact]
+    public void BenchmarkWithCancellationTokenProperty_ReceivesToken_InProcessEmit()
+    {
+        var config = ManualConfig.CreateEmpty()
+            .AddJob(Job.Dry.WithToolchain(InProcessEmitToolchain.Default))
+            .AddLogger(new OutputLogger(Output));
+
+        CanExecute<BenchmarkWithCancellationToken>(config);
+    }
+
+    [Theory]
+    [MemberData(nameof(CancellationToolchains), DisableDiscoveryEnumeration = true)]
+    public void StaticCancellationTokenOnABaseTypeReceivesToken(IToolchain toolchain)
+    {
+        var config = ManualConfig.CreateEmpty()
+            .AddJob(Job.Dry.WithToolchain(toolchain))
+            .AddLogger(new OutputLogger(Output));
+
+        CanExecute<InheritsStaticCancellationToken>(config);
+    }
+
+    public static IEnumerable<object[]> CancellationToolchains()
+    {
+        yield return [InProcessNoEmitToolchain.Default];
+        yield return [InProcessEmitToolchain.Default];
+
+        if (ContinuousIntegration.IsGitHubDraftPR())
+            yield break;
+
+        yield return [Job.Default.GetToolchain()];
+    }
+
+    [TheoryEnvSpecific("JSVU does not support ARM on Windows or Linux", EnvRequirement.NonWindowsArm, EnvRequirement.NonLinuxArm, EnvRequirement.NonGitHubDraftPR)]
+    [InlineData("v8")]
+    [InlineData("node")]
+    public void BenchmarkWithCancellationTokenProperty_ReceivesToken_Wasm(string javaScriptEngine)
+    {
+        var logger = new OutputLogger(Output);
+        var wasmSettings = new WasmSettings { JavaScriptEngine = javaScriptEngine };
+
+        var config = ManualConfig.CreateEmpty()
+            .AddLogger(logger)
+            .AddJob(Job.Dry
+                .WithToolchain(CsProjMonoWasmToolchain.From(MonoWasmRuntime.Net10_0, wasmSettings)))
+            .WithBuildTimeout(TimeSpan.FromSeconds(480))
+            .WithOption(ConfigOptions.LogBuildOutput, true)
+            .WithOption(ConfigOptions.GenerateMSBuildBinLog, false);
+
+        CanExecute<BenchmarkWithCancellationToken>(config);
+    }
+
+    [Fact]
+    public async Task RunWithCancellationTokenIsCancelled()
+    {
+        var cts = new CancellationTokenSource();
+        var diagnoser = new CancelAfterFirstIterationDiagnoser(cts);
+
+        var config = ManualConfig.CreateEmpty()
+            .AddJob(Job.Dry)
+            .AddLogger(new OutputLogger(Output))
+            .AddDiagnoser(diagnoser);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await BenchmarkRunner.RunAsync<SimpleBenchmark>(config, cancellationToken: cts.Token));
+    }
+
+    [Fact]
+    public async Task RunWithCancellationTokenIsCancelled_InProcessNoEmit()
+    {
+        var cts = new CancellationTokenSource();
+        var diagnoser = new CancelAfterFirstIterationDiagnoser(cts);
+
+        var config = ManualConfig.CreateEmpty()
+            .AddJob(Job.Dry.WithToolchain(InProcessNoEmitToolchain.Default))
+            .AddLogger(new OutputLogger(Output))
+            .AddDiagnoser(diagnoser);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await BenchmarkRunner.RunAsync<SimpleBenchmark>(config, cancellationToken: cts.Token));
+    }
+
+    [Fact]
+    public async Task RunWithCancellationTokenIsCancelled_InProcessEmit()
+    {
+        var cts = new CancellationTokenSource();
+        var diagnoser = new CancelAfterFirstIterationDiagnoser(cts);
+
+        var config = ManualConfig.CreateEmpty()
+            .AddJob(Job.Dry.WithToolchain(InProcessEmitToolchain.Default))
+            .AddLogger(new OutputLogger(Output))
+            .AddDiagnoser(diagnoser);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await BenchmarkRunner.RunAsync<SimpleBenchmark>(config, cancellationToken: cts.Token));
+    }
+
+    [TheoryEnvSpecific(EnvRequirement.NonGitHubDraftPR)]
+    [InlineDataEnvSpecific("v8", "JSVU does not support ARM on Windows or Linux", [EnvRequirement.NonWindowsArm, EnvRequirement.NonLinuxArm, EnvRequirement.NonGitHubDraftPR])]
+    [InlineData("node")]
+    public async Task RunWithCancellationTokenIsCancelled_Wasm(string javaScriptEngine)
+    {
+        var cts = new CancellationTokenSource();
+        var diagnoser = new CancelAfterFirstIterationDiagnoser(cts);
+
+        var logger = new OutputLogger(Output);
+        var wasmSettings = new WasmSettings { JavaScriptEngine = javaScriptEngine };
+
+        var config = ManualConfig.CreateEmpty()
+            .AddLogger(logger)
+            .AddJob(Job.Dry
+                .WithToolchain(CsProjMonoWasmToolchain.From(MonoWasmRuntime.Net10_0, wasmSettings)))
+            .AddDiagnoser(diagnoser)
+            .WithBuildTimeout(TimeSpan.FromSeconds(480))
+            .WithOption(ConfigOptions.LogBuildOutput, true)
+            .WithOption(ConfigOptions.GenerateMSBuildBinLog, false);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await BenchmarkRunner.RunAsync<SimpleBenchmark>(config, cancellationToken: cts.Token));
+    }
+
+    public class BenchmarkWithCancellationToken
+    {
+        [BenchmarkCancellation]
+        public CancellationToken CancellationToken { get; set; }
+
+        [Benchmark]
+        public void CheckToken()
+        {
+            Assert.True(CancellationToken.CanBeCanceled);
+            Assert.False(CancellationToken.IsCancellationRequested);
+        }
+    }
+
+    // A static [BenchmarkCancellation] member declared on a base type. Reflection withholds a base type's statics
+    // unless FlattenHierarchy is asked for, which BenchmarkCancellationValidator asks for and the assignment sites
+    // did not - so the member validated but was never written, leaving the benchmark a default token.
+    public class StaticCancellationTokenOnABase
+    {
+        [BenchmarkCancellation]
+        public static CancellationToken InheritedToken { get; set; }
+    }
+
+    public class InheritsStaticCancellationToken : StaticCancellationTokenOnABase
+    {
+        [Benchmark]
+        public void CheckToken()
+        {
+            Assert.True(InheritedToken.CanBeCanceled);
+            Assert.False(InheritedToken.IsCancellationRequested);
+        }
+    }
+
+    public class SimpleBenchmark
+    {
+        [Benchmark]
+        public void Empty() { }
+    }
+
+    public class CancelAfterFirstIterationDiagnoser(CancellationTokenSource cts) : IDiagnoser
+    {
+        public IEnumerable<string> Ids => [nameof(CancelAfterFirstIterationDiagnoser)];
+
+        public IEnumerable<IExporter> Exporters => [];
+
+        public IEnumerable<IAnalyser> Analysers => [];
+
+        public BenchmarkDotNet.Diagnosers.RunMode GetRunMode(BenchmarkCase benchmarkCase) => BenchmarkDotNet.Diagnosers.RunMode.NoOverhead;
+
+        public IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters)
+            => AsyncEnumerable.Empty<ValidationError>();
+
+        public ValueTask HandleAsync(HostSignal signal, DiagnoserActionParameters parameters, CancellationToken cancellationToken)
+        {
+            if (signal == HostSignal.BeforeAnythingElse)
+            {
+                cts.Cancel();
+            }
+            return new();
+        }
+
+        public IEnumerable<Metric> ProcessResults(DiagnoserResults results) => [];
+
+        public void DisplayResults(ILogger logger) { }
+    }
+}

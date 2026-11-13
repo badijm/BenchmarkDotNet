@@ -1,8 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Characteristics;
 using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.Extensions;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Toolchains.InProcess.Emit;
@@ -28,7 +26,6 @@ namespace BenchmarkDotNet.Toolchains.InProcess
                 { EnvironmentMode.AffinityCharacteristic, DontValidate },
                 { EnvironmentMode.JitCharacteristic, ValidateEnvironment },
                 { EnvironmentMode.PlatformCharacteristic, ValidatePlatform },
-                { EnvironmentMode.RuntimeCharacteristic, ValidateEnvironment },
                 { GcMode.ServerCharacteristic, ValidateEnvironment },
                 { GcMode.ConcurrentCharacteristic, ValidateEnvironment },
                 { GcMode.CpuGroupsCharacteristic, ValidateEnvironment },
@@ -44,6 +41,7 @@ namespace BenchmarkDotNet.Toolchains.InProcess
                 { RunMode.IterationTimeCharacteristic, DontValidate },
                 { RunMode.InvocationCountCharacteristic, DontValidate },
                 { RunMode.UnrollFactorCharacteristic, DontValidate },
+                { RunMode.ConsumeTasksSynchronouslyCharacteristic, DontValidate },
                 { AccuracyMode.AnalyzeLaunchVarianceCharacteristic, DontValidate },
                 { AccuracyMode.EvaluateOverheadCharacteristic, DontValidate },
                 { AccuracyMode.MaxRelativeErrorCharacteristic, DontValidate },
@@ -58,7 +56,7 @@ namespace BenchmarkDotNet.Toolchains.InProcess
 
         // ReSharper restore HeapView.DelegateAllocation
 
-        private static string DontValidate(Job job, Characteristic characteristic) => null;
+        private static string DontValidate(Job job, Characteristic characteristic) => "";
 
         private static string ValidateEnvironment(Job job, Characteristic characteristic)
         {
@@ -66,14 +64,14 @@ namespace BenchmarkDotNet.Toolchains.InProcess
             var actual = resolver.Resolve(Job.Default, characteristic);
             var expected = resolver.Resolve(job, characteristic);
             return Equals(actual, expected)
-                ? null
+                ? ""
                 : $"was run as {actual} ({expected} expected). Fix your test runner options.";
         }
 
         private static string ValidatePlatform(Job job, Characteristic characteristic)
         {
             if (job.Environment.Platform == Platform.AnyCpu)
-                return null;
+                return "";
 
             return ValidateEnvironment(job, characteristic);
         }
@@ -81,7 +79,7 @@ namespace BenchmarkDotNet.Toolchains.InProcess
         private static string ValidateToolchain(Job job, Characteristic characteristic) =>
             job.Infrastructure.Toolchain is InProcessEmitToolchain
             || job.Infrastructure.Toolchain is InProcessNoEmitToolchain
-                ? null
+                ? ""
                 : $"should be instance of {nameof(InProcessEmitToolchain)} or {nameof(InProcessNoEmitToolchain)}.";
 
         /// <summary>The instance of validator that does NOT fail on error.</summary>
@@ -90,7 +88,7 @@ namespace BenchmarkDotNet.Toolchains.InProcess
         /// <summary>The instance of validator that DOES fail on error.</summary>
         public static readonly IValidator FailOnError = new InProcessValidator(true);
 
-        public static IEnumerable<ValidationError> Validate(BenchmarkCase benchmarkCase)
+        public static async IAsyncEnumerable<ValidationError> ValidateAsync(BenchmarkCase benchmarkCase)
         {
             foreach (var validationError in ValidateJob(benchmarkCase.Job, true))
             {
@@ -111,7 +109,7 @@ namespace BenchmarkDotNet.Toolchains.InProcess
                 if (ValidationRules.TryGetValue(characteristic, out var validationRule))
                 {
                     string message = validationRule(job, characteristic);
-                    if (!string.IsNullOrEmpty(message))
+                    if (message.IsNotBlank())
                         yield return new ValidationError(
                                 isCritical,
                                 $"Job {job}, {characteristic.FullId} {message}");
@@ -141,18 +139,8 @@ namespace BenchmarkDotNet.Toolchains.InProcess
         /// <summary>Proofs that benchmarks' jobs match the environment.</summary>
         /// <param name="validationParameters">The validation parameters.</param>
         /// <returns>Enumerable of validation errors.</returns>
-        public IEnumerable<ValidationError> Validate(ValidationParameters validationParameters)
+        public async IAsyncEnumerable<ValidationError> ValidateAsync(ValidationParameters validationParameters)
         {
-            foreach (var target in validationParameters.Benchmarks
-                .Where(benchmark => !string.IsNullOrEmpty(benchmark.Descriptor.AdditionalLogic))
-                .Select(b => b.Descriptor)
-                .Distinct())
-            {
-                yield return new ValidationError(
-                    false,
-                    $"Target {target} has {nameof(target.AdditionalLogic)} filled. AdditionalLogic is not supported by in-process toolchain.");
-            }
-
             foreach (var benchmarkWithArguments in validationParameters.Benchmarks.Where(benchmark => benchmark.HasArguments && benchmark.GetToolchain() is InProcessNoEmitToolchain))
                 yield return new ValidationError(true, "Arguments are not supported by the InProcessNoEmitToolchain, see #687 for more details", benchmarkWithArguments);
 

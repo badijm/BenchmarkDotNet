@@ -1,9 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
-using System.Linq;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Environments;
@@ -11,9 +5,11 @@ using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Parameters;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
-using BenchmarkDotNet.Validators;
+using BenchmarkDotNet.Tests.Mocks;
 using Perfolizer.Horology;
-using Xunit;
+using System.Collections.Immutable;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 
 namespace BenchmarkDotNet.Tests.Columns
 {
@@ -37,17 +33,15 @@ namespace BenchmarkDotNet.Tests.Columns
             var summaryStyle = new SummaryStyle(TestCultureInfo.Instance, printUnitsInHeader, null, timeUnit, printUnitsInContent);
             var config = new ManualConfig().WithSummaryStyle(summaryStyle);
             var benchmarkCase = new BenchmarkCase(
-                new Descriptor(null, null),
+                new Descriptor(MockFactory.MockType, MockFactory.MockMethodInfo),
                 Job.Dry,
-                new ParameterInstances(ImmutableArray<ParameterInstance>.Empty),
+                ParameterInstances.Empty,
                 ImmutableConfigBuilder.Create(config));
             var metric = new Metric(LocalMetricDescriptor.TimeInstance, metricValue);
-            var benchmarkReport = new BenchmarkReport(true, benchmarkCase, null, null, null, new List<Metric>()
-            {
-                metric
-            });
+            var benchmarkReport = new BenchmarkReport(true, benchmarkCase, null!, null, [metric]);
+
             return new Summary("", new[] { benchmarkReport }.ToImmutableArray(), HostEnvironmentInfo.GetCurrent(),
-                "", "", TimeSpan.Zero, CultureInfo.InvariantCulture, ImmutableArray<ValidationError>.Empty, ImmutableArray<IColumnHidingRule>.Empty);
+                "", "", TimeSpan.Zero, CultureInfo.InvariantCulture, [], []);
         }
 
         [SuppressMessage("ReSharper", "UnassignedGetOnlyAutoProperty")]
@@ -58,6 +52,10 @@ namespace BenchmarkDotNet.Tests.Columns
             private LocalMetricDescriptor(UnitType unitType)
             {
                 UnitType = unitType;
+
+                Legend = default!;
+                NumberFormat = default!;
+                Unit = default!;
             }
 
             public string Id { get; } = nameof(LocalMetricDescriptor);
@@ -68,6 +66,7 @@ namespace BenchmarkDotNet.Tests.Columns
             public string Unit { get; }
             public bool TheGreaterTheBetter { get; }
             public int PriorityInCategory => 0;
+            public bool GetIsAvailable(Metric metric) => true;
         }
     }
 }

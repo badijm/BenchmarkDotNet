@@ -1,7 +1,3 @@
-﻿using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Disassemblers;
 using BenchmarkDotNet.Extensions;
@@ -9,18 +5,20 @@ using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Reports;
 using BenchmarkDotNet.Running;
+using System.Text;
 
 namespace BenchmarkDotNet.Exporters
 {
     internal class InstructionPointerExporter : IExporter
     {
-        internal const string CssStyle = @"
-<style type=""text/css"">
-    pre { margin: 0px; }
-    table { border-collapse:collapse; }
-    td.perMethod { border-top: 1px black solid; }
-    tr.evenMap td { background-color: #F5F5F5; }  
-</style>";
+        internal const string CssStyle = """
+            <style type="text/css">
+                pre { margin: 0px; }
+                table { border-collapse:collapse; }
+                td.perMethod { border-top: 1px black solid; }
+                tr.evenMap td { background-color: #F5F5F5; }  
+            </style>
+            """;
 
         private readonly IHardwareCountersDiagnoser hardwareCountersDiagnoser;
         private readonly DisassemblyDiagnoser disassemblyDiagnoser;
@@ -33,9 +31,7 @@ namespace BenchmarkDotNet.Exporters
 
         public string Name => nameof(InstructionPointerExporter);
 
-        public void ExportToLog(Summary summary, ILogger logger) { }
-
-        public IEnumerable<string> ExportToFiles(Summary summary, ILogger consoleLogger)
+        public async ValueTask ExportAsync(Summary summary, ILogger logger, CancellationToken cancellationToken)
         {
             var hardwareCounters = hardwareCountersDiagnoser.Results;
             var disassembly = disassemblyDiagnoser.Results;
@@ -43,31 +39,27 @@ namespace BenchmarkDotNet.Exporters
             foreach (var disassemblyResult in disassembly)
             {
                 if (hardwareCounters.TryGetValue(disassemblyResult.Key, out var pmcStats))
-                    yield return Export(summary, disassemblyResult.Key, disassemblyResult.Value, pmcStats);
+                    await Export(summary, disassemblyResult.Key, disassemblyResult.Value, pmcStats, logger, cancellationToken).ConfigureAwait(false);
             }
         }
 
-        private string Export(Summary summary, BenchmarkCase benchmarkCase, DisassemblyResult disassemblyResult, PmcStats pmcStats)
+        private async ValueTask Export(Summary summary, BenchmarkCase benchmarkCase, DisassemblyResult disassemblyResult, PmcStats pmcStats, ILogger logger, CancellationToken cancellationToken)
         {
             string filePath = Path.Combine(summary.ResultsDirectoryPath,
-                                            $"{FolderNameHelper.ToFolderName(benchmarkCase.Descriptor.Type)}." +
-                                            $"{benchmarkCase.Descriptor.WorkloadMethod.Name}." +
-                                            $"{GetShortRuntimeInfo(summary[benchmarkCase].GetRuntimeInfo())}.counters.html");
+                $"{FolderNameHelper.ToFolderName(benchmarkCase.Descriptor.Type)}." +
+                $"{benchmarkCase.Descriptor.WorkloadMethod.Name}." +
+                $"{GetShortRuntimeInfo(summary[benchmarkCase]!.GetRuntimeInfo()!)}.counters.html");
 
             filePath.DeleteFileIfExists();
 
             var totals = SumHardwareCountersStatsOfBenchmarkedCode(disassemblyResult, pmcStats);
             var perMethod = SumHardwareCountersPerMethod(disassemblyResult, pmcStats);
 
-            using (var stream = new StreamWriter(filePath, append: false))
-            {
-                using (var streamLogger = new StreamLogger(stream))
-                {
-                    Export(streamLogger, benchmarkCase, totals, perMethod, pmcStats.Counters.Keys.ToArray());
-                }
-            }
+            using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.Read, 4096, useAsync: true);
+            using var writer = new CancelableStreamWriter(fileStream);
+            await ExportAsync(writer, benchmarkCase, totals, perMethod, pmcStats.Counters.Keys.ToArray(), cancellationToken).ConfigureAwait(false);
 
-            return filePath;
+            logger.WriteLineInfo($"  {filePath.GetBaseName(Directory.GetCurrentDirectory())}");
         }
 
         /// <summary>
@@ -80,7 +72,7 @@ namespace BenchmarkDotNet.Exporters
             IEnumerable<ulong> Range(Asm asm)
             {
                 // most probably asm.StartAddress would be enough, but I don't want to miss any edge case
-                for (ulong instructionPointer = asm.InstructionPointer; instructionPointer < asm.InstructionPointer + (ulong)asm.InstructionLength; instructionPointer++)
+                for (ulong instructionPointer = asm.InstructionPointer; instructionPointer < asm.InstructionPointer + (ulong) asm.InstructionLength; instructionPointer++)
                     yield return instructionPointer;
             }
 
@@ -113,7 +105,7 @@ namespace BenchmarkDotNet.Exporters
         {
             var model = new List<MethodWithCounters>(disassemblyResult.Methods.Length);
 
-            foreach (var method in disassemblyResult.Methods.Where(method => string.IsNullOrEmpty(method.Problem)))
+            foreach (var method in disassemblyResult.Methods.Where(method => method.Problem.IsBlank()))
             {
                 var groups = new List<List<CodeWithCounters>>();
 
@@ -130,7 +122,7 @@ namespace BenchmarkDotNet.Exporters
                             foreach (var hardwareCounter in pmcStats.Counters)
                             {
                                 // most probably asm.StartAddress would be enough, but I don't want to miss any edge case
-                                for (ulong instructionPointer = asm.InstructionPointer; instructionPointer < asm.InstructionPointer + (ulong)asm.InstructionLength; instructionPointer++)
+                                for (ulong instructionPointer = asm.InstructionPointer; instructionPointer < asm.InstructionPointer + (ulong) asm.InstructionLength; instructionPointer++)
                                     if (hardwareCounter.Value.PerInstructionPointer.TryGetValue(instructionPointer, out ulong value))
                                         totalsPerCounter[hardwareCounter.Key] = totalsPerCounter[hardwareCounter.Key] + value;
                             }
@@ -169,92 +161,98 @@ namespace BenchmarkDotNet.Exporters
             return model;
         }
 
-        private void Export(ILogger logger, BenchmarkCase benchmarkCase, Dictionary<HardwareCounter, (ulong withoutNoise, ulong total)> totals, IReadOnlyList<MethodWithCounters> model, HardwareCounter[] hardwareCounters)
+        private async ValueTask ExportAsync(
+            CancelableStreamWriter writer,
+            BenchmarkCase benchmarkCase,
+            Dictionary<HardwareCounter, (ulong withoutNoise, ulong total)> totals,
+            IReadOnlyList<MethodWithCounters> model,
+            HardwareCounter[] hardwareCounters,
+            CancellationToken cancellationToken)
         {
             int columnsCount = hardwareCounters.Length + 1;
 
-            logger.WriteLine("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8' />");
-            logger.WriteLine($"<title>Combined Output of DisassemblyDiagnoser and HardwareCounters {benchmarkCase.DisplayInfo}</title>");
-            logger.WriteLine(CssStyle);
-            logger.WriteLine("</head>");
+            await writer.WriteLineAsync("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8' />", cancellationToken).ConfigureAwait(false);
+            await writer.WriteLineAsync($"<title>Combined Output of DisassemblyDiagnoser and HardwareCounters {benchmarkCase.DisplayInfo}</title>", cancellationToken).ConfigureAwait(false);
+            await writer.WriteLineAsync(CssStyle, cancellationToken).ConfigureAwait(false);
+            await writer.WriteLineAsync("</head>", cancellationToken).ConfigureAwait(false);
 
-            logger.WriteLine("<body>");
+            await writer.WriteLineAsync("<body>", cancellationToken).ConfigureAwait(false);
 
-            logger.WriteLine("<!-- Generated with BenchmarkDotNet ");
+            await writer.WriteLineAsync("<!-- Generated with BenchmarkDotNet ", cancellationToken).ConfigureAwait(false);
             foreach (var total in totals)
             {
                 // this stats are mostly for me, the maintainer, who wants to know if removing noise makes any sense
-                logger.WriteLine($"For {total.Key} we have {total.Value.total} in total, {total.Value.withoutNoise} without noise");
+                await writer.WriteLineAsync($"For {total.Key} we have {total.Value.total} in total, {total.Value.withoutNoise} without noise", cancellationToken).ConfigureAwait(false);
             }
-            logger.WriteLine("-->");
+            await writer.WriteLineAsync("-->", cancellationToken).ConfigureAwait(false);
 
-            logger.WriteLine("<table><thead><tr>");
+            await writer.WriteLineAsync("<table><thead><tr>", cancellationToken).ConfigureAwait(false);
 
             foreach (var hardwareCounter in hardwareCounters)
-                logger.WriteLine($"<th>{hardwareCounter.ToShortName()}</th>");
+                await writer.WriteLineAsync($"<th>{hardwareCounter.ToShortName()}</th>", cancellationToken).ConfigureAwait(false);
 
-            logger.WriteLine("<th></th></tr></thead>");
+            await writer.WriteLineAsync("<th></th></tr></thead>", cancellationToken).ConfigureAwait(false);
 
-            logger.WriteLine("<tbody>");
+            await writer.WriteLineAsync("<tbody>", cancellationToken).ConfigureAwait(false);
             var disassemblyResult = disassemblyDiagnoser.Results[benchmarkCase];
             var config = disassemblyDiagnoser.Config;
             var formatterWithSymbols = config.GetFormatterWithSymbolSolver(disassemblyResult.AddressToNameMapping);
             foreach (var method in model.Where(data => data.HasCounters))
             {
-                logger.WriteLine($"<tr><th colspan=\"{columnsCount}\">{method.Method.Name}</th></tr>");
+                await writer.WriteLineAsync($"<tr><th colspan=\"{columnsCount}\">{method.Method.Name}</th></tr>", cancellationToken).ConfigureAwait(false);
 
                 bool evenMap = true;
                 foreach (var map in method.Instructions)
                 {
                     foreach (var instruction in map)
                     {
-                        logger.WriteLine($"<tr class=\"{(evenMap ? "evenMap" : "oddMap")}\">");
+                        await writer.WriteLineAsync($"<tr class=\"{(evenMap ? "evenMap" : "oddMap")}\">", cancellationToken).ConfigureAwait(false);
 
                         foreach (var hardwareCounter in hardwareCounters)
                         {
                             ulong totalWithoutNoise = totals[hardwareCounter].withoutNoise;
                             ulong forRange = instruction.SumPerCounter[hardwareCounter];
 
-                            logger.Write(forRange != 0
+                            await writer.WriteAsync(forRange != 0
                                 ? $"<td title=\"{forRange} of {totalWithoutNoise}\">{(double) forRange / totalWithoutNoise:P}</td>"
-                                : "<td>-</td>");
+                                : "<td>-</td>", cancellationToken).ConfigureAwait(false);
                         }
 
-                        if (instruction.Code is Sharp sharp && !string.IsNullOrEmpty(sharp.FilePath))
-                            logger.Write($"<td title=\"{sharp.FilePath} line {sharp.LineNumber}\">");
+                        if (instruction.Code is Sharp sharp && sharp.FilePath.IsNotBlank())
+                            await writer.WriteAsync($"<td title=\"{sharp.FilePath} line {sharp.LineNumber}\">", cancellationToken).ConfigureAwait(false);
                         else
-                            logger.Write("<td>");
+                            await writer.WriteAsync("<td>", cancellationToken).ConfigureAwait(false);
 
                         string formatted = CodeFormatter.Format(instruction.Code, formatterWithSymbols, config.PrintInstructionAddresses, disassemblyResult.PointerSize, disassemblyResult.AddressToNameMapping);
-                        logger.WriteLine($"<pre><code>{formatted}</pre></code></td></tr>");
+                        await writer.WriteLineAsync($"<pre><code>{formatted}</pre></code></td></tr>", cancellationToken).ConfigureAwait(false);
                     }
 
                     evenMap = !evenMap;
                 }
 
-                logger.WriteLine("<tr>");
+                await writer.WriteLineAsync("<tr>", cancellationToken).ConfigureAwait(false);
                 foreach (var hardwareCounter in hardwareCounters)
                 {
                     ulong totalWithoutNoise = totals[hardwareCounter].withoutNoise;
                     ulong forMethod = method.SumPerCounter[hardwareCounter];
 
-                    logger.Write(forMethod != 0
+                    await writer.WriteAsync(forMethod != 0
                         ? $"<td class=\"perMethod\" title=\"{forMethod} of {totalWithoutNoise}\">{(double) forMethod / totalWithoutNoise:P}</td>"
-                        : "<td  class=\"perMethod\">-</td>");
+                        : "<td  class=\"perMethod\">-</td>", cancellationToken).ConfigureAwait(false);
                 }
-                logger.WriteLine("<td></td></tr>");
-                logger.WriteLine($"<tr><td colspan=\"{columnsCount}\"></td></tr>");
+                await writer.WriteLineAsync("<td></td></tr>", cancellationToken).ConfigureAwait(false);
+                await writer.WriteLineAsync($"<tr><td colspan=\"{columnsCount}\"></td></tr>", cancellationToken).ConfigureAwait(false);
             }
 
             if (model.Any(data => !data.HasCounters))
             {
-                logger.WriteLine($"<tr><td colspan=\"{columnsCount}\">Method(s) without any hardware counters:</td></tr>");
+                await writer.WriteLineAsync($"<tr><td colspan=\"{columnsCount}\">Method(s) without any hardware counters:</td></tr>", cancellationToken).ConfigureAwait(false);
 
                 foreach (var method in model.Where(data => !data.HasCounters))
-                    logger.WriteLine($"<tr><td colspan=\"{columnsCount}\">{method.Method.Name}</td></tr>");
+                    await writer.WriteLineAsync($"<tr><td colspan=\"{columnsCount}\">{method.Method.Name}</td></tr>", cancellationToken).ConfigureAwait(false);
             }
 
-            logger.WriteLine("</tbody></table></body></html>");
+            await writer.WriteLineAsync("</tbody></table></body></html>", cancellationToken).ConfigureAwait(false);
         }
 
         // fullInfo is sth like ".NET Core 2.1.21 (CoreCLR 4.6.29130.01, CoreFX 4.6.29130.02), X64 RyuJIT"
@@ -291,15 +289,15 @@ namespace BenchmarkDotNet.Exporters
 
         private class CodeWithCounters
         {
-            internal SourceCode Code { get; set; }
-            internal IReadOnlyDictionary<HardwareCounter, ulong> SumPerCounter { get; set; }
+            internal required SourceCode Code { get; set; }
+            internal required IReadOnlyDictionary<HardwareCounter, ulong> SumPerCounter { get; set; }
         }
 
         private class MethodWithCounters
         {
-            internal DisassembledMethod Method { get; set; }
-            internal IReadOnlyList<IReadOnlyList<CodeWithCounters>> Instructions { get; set; }
-            internal IReadOnlyDictionary<HardwareCounter, ulong> SumPerCounter { get; set; }
+            internal required DisassembledMethod Method { get; set; }
+            internal required IReadOnlyList<IReadOnlyList<CodeWithCounters>> Instructions { get; set; }
+            internal required IReadOnlyDictionary<HardwareCounter, ulong> SumPerCounter { get; set; }
 
             internal bool HasCounters => SumPerCounter.Values.Any(value => value != default);
         }

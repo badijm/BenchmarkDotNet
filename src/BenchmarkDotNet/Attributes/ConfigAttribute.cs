@@ -1,4 +1,3 @@
-﻿using System;
 using BenchmarkDotNet.Configs;
 
 namespace BenchmarkDotNet.Attributes
@@ -8,6 +7,6 @@ namespace BenchmarkDotNet.Attributes
     {
         public IConfig Config { get; }
 
-        public ConfigAttribute(Type type) => Config = (IConfig)Activator.CreateInstance(type);
+        public ConfigAttribute(Type type) => Config = (IConfig) Activator.CreateInstance(type)!;
     }
 }

@@ -1,7 +1,4 @@
-﻿using System;
 using BenchmarkDotNet.Attributes;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -101,7 +98,7 @@ namespace BenchmarkDotNet.IntegrationTests
         public class InvalidFileNamesInParams
         {
             [Params("/\\@#$%")]
-            public string Field;
+            public required string Field;
 
             [Benchmark]
             public void Benchmark() => Console.WriteLine("// " + Field);
@@ -112,18 +109,18 @@ namespace BenchmarkDotNet.IntegrationTests
 
         public class CompileSpecialCharactersInString
         {
-            [Params("\0")] public string Null;
-            [Params("\t")] public string Tab;
-            [Params("\n")] public string NewLine;
-            [Params("\\")] public string Slash;
-            [Params("\"")] public string Quote;
-            [Params("\u0061")] public string Unicode;
-            [Params("{")] public string Bracket;
+            [Params("\0")] public required string Null;
+            [Params("\t")] public required string Tab;
+            [Params("\n")] public required string NewLine;
+            [Params("\\")] public required string Slash;
+            [Params("\"")] public required string Quote;
+            [Params("\u0061")] public required string Unicode;
+            [Params("{")] public required string Bracket;
 
-            [Params("\n \0 \n")] public string Combo;
+            [Params("\n \0 \n")] public required string Combo;
 
-            [Params("C:\\file1.txt")] public string Path1;
-            [Params(@"C:\file2.txt")] public string Path2;
+            [Params("C:\\file1.txt")] public required string Path1;
+            [Params(@"C:\file2.txt")] public required string Path2;
 
             [Benchmark]
             public void Benchmark()
@@ -166,7 +163,7 @@ namespace BenchmarkDotNet.IntegrationTests
             private const string Json = "{ \"message\": \"Hello, World!\" }";
 
             [Params(Json)]
-            public string Field;
+            public required string Field;
 
             [Benchmark]
             [Arguments(Json)]
@@ -183,7 +180,7 @@ namespace BenchmarkDotNet.IntegrationTests
         public class WithArray
         {
             [Params(new[] { 0, 1, 2 })]
-            public int[] Array;
+            public required int[] Array;
 
             [Benchmark]
             public void AcceptingArray()
@@ -217,5 +214,28 @@ namespace BenchmarkDotNet.IntegrationTests
                     throw new ArgumentException($"{nameof(StaticParamProperty)} has wrong value: {StaticParamProperty}!");
             }
         }
+
+#if NET8_0_OR_GREATER
+        [Fact]
+        public void ParamsSupportRequiredProperty()
+        {
+            var summary = CanExecute<ParamsTestRequiredProperty>();
+            var standardOutput = GetCombinedStandardOutput(summary);
+
+            foreach (var param in new[] { "a", "b" })
+            {
+                Assert.Contains($"// ### New Parameter {param} ###", standardOutput);
+            }
+        }
+
+        public class ParamsTestRequiredProperty
+        {
+            [Params("a", "b")]
+            public required string ParamProperty { get; set; }
+
+            [Benchmark]
+            public void Benchmark() => Console.WriteLine($"// ### New Parameter {ParamProperty} ###");
+        }
+#endif
     }
 }

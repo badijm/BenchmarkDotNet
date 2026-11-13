@@ -1,4 +1,3 @@
-﻿using System;
 using BenchmarkDotNet.Jobs;
 using JetBrains.Annotations;
 

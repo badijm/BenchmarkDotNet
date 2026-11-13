@@ -1,12 +1,7 @@
-﻿using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
-using Xunit;
+using System.Collections;
 
 namespace BenchmarkDotNet.Tests.Validators
 {
@@ -25,7 +20,7 @@ namespace BenchmarkDotNet.Tests.Validators
 
         public class ReturningIEnumerableOfInt
         {
-            private IEnumerable<int> field = Enumerable.Empty<int>();
+            private IEnumerable<int> field = [];
 
             [Benchmark] public IEnumerable<int> Benchmark() => field;
             [Benchmark] public Task<IEnumerable<int>> BenchmarkTask() => Task.FromResult(field);
@@ -73,18 +68,18 @@ namespace BenchmarkDotNet.Tests.Validators
         [InlineData(typeof(ReturningIQueryable))]
         [InlineData(typeof(ReturningIQueryableOfInt))]
         [InlineData(typeof(ReturningLazyOfInt))]
-        public void DeferredExecutionMeansError(Type returningDeferredExecutionResult)
+        public async Task DeferredExecutionMeansError(Type returningDeferredExecutionResult)
         {
             var benchmarks = BenchmarkConverter.TypeToBenchmarks(returningDeferredExecutionResult);
 
-            var validationErrors = DeferredExecutionValidator.FailOnError.Validate(benchmarks).ToArray();
+            var validationErrors = await DeferredExecutionValidator.FailOnError.ValidateAsync(benchmarks).ToArrayAsync();
 
             Assert.Equal(5, validationErrors.Count(error => error.IsCritical));
         }
 
         public class ReturningArray
         {
-            private int[] field = Array.Empty<int>();
+            private int[] field = [];
 
             [Benchmark] public int[] Benchmark() => field;
             [Benchmark] public Task<int[]> BenchmarkTask() => Task.FromResult(field);
@@ -95,7 +90,7 @@ namespace BenchmarkDotNet.Tests.Validators
 
         public class ReturningDictionary
         {
-            private Dictionary<int, int> field = new Dictionary<int, int>();
+            private Dictionary<int, int> field = [];
 
             [Benchmark] public Dictionary<int, int> Benchmark() => field;
             [Benchmark] public Task<Dictionary<int, int>> BenchmarkTask() => Task.FromResult(field);
@@ -107,11 +102,11 @@ namespace BenchmarkDotNet.Tests.Validators
         [Theory]
         [InlineData(typeof(ReturningArray))]
         [InlineData(typeof(ReturningDictionary))]
-        public void MaterializedCollectionsAreOk(Type returningMaterializedResult)
+        public async Task MaterializedCollectionsAreOk(Type returningMaterializedResult)
         {
             var benchmarks = BenchmarkConverter.TypeToBenchmarks(returningMaterializedResult);
 
-            var validationErrors = DeferredExecutionValidator.FailOnError.Validate(benchmarks).ToArray();
+            var validationErrors = await DeferredExecutionValidator.FailOnError.ValidateAsync(benchmarks).ToArrayAsync();
 
             Assert.Empty(validationErrors);
         }

@@ -1,4 +1,4 @@
-﻿namespace BenchmarkDotNet.Environments
+namespace BenchmarkDotNet.Environments
 {
     public enum Platform
     {
@@ -51,5 +51,10 @@
         /// A PowerPC 64-bit (little-endian) processor architecture.
         /// </summary>
         Ppc64le,
+
+        /// <summary>
+        /// A RiscV 64-bit processor architecture.
+        /// </summary>
+        RiscV64,
     }
 }

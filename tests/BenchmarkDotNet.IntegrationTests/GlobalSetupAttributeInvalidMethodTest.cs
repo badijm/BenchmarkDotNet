@@ -1,8 +1,4 @@
-﻿using System;
-using System.Threading;
 using BenchmarkDotNet.Attributes;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -14,7 +10,10 @@ namespace BenchmarkDotNet.IntegrationTests
         public void GlobalSetupAttributeMethodsMustHaveNoParameters()
         {
             var summary = CanExecute<GlobalSetupAttributeInvalidMethod>(fullValidation: false);
-            Assert.Equal("GlobalSetup method GlobalSetup has incorrect signature.\nMethod shouldn't have any arguments.", summary.Title);
+
+            Assert.True(summary.HasCriticalValidationErrors);
+            Assert.Contains(summary.ValidationErrors,
+                error => error.Message == "GlobalSetup method GlobalSetup has incorrect signature.\nMethod shouldn't have any arguments.");
         }
 
         public class GlobalSetupAttributeInvalidMethod

@@ -1,5 +1,3 @@
-﻿using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Reports;
 
 namespace BenchmarkDotNet.Columns
@@ -12,6 +10,6 @@ namespace BenchmarkDotNet.Columns
         {
         }
 
-        public IEnumerable<IColumn> GetColumns(Summary summary) => Enumerable.Empty<IColumn>();
+        public IEnumerable<IColumn> GetColumns(Summary summary) => [];
     }
 }

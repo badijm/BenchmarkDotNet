@@ -1,4 +1,3 @@
-﻿using System;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Mathematics;
 

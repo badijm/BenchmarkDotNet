@@ -1,11 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text.RegularExpressions;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
-using Xunit;
+using System.Text.RegularExpressions;
 
 namespace BenchmarkDotNet.Tests.Validators
 {
@@ -14,9 +10,9 @@ namespace BenchmarkDotNet.Tests.Validators
         private const string ErrorMessagePrefix = "Inconsistent benchmark return values";
 
         [Fact]
-        public void ThrowingBenchmarksAreDiscovered()
+        public async Task ThrowingBenchmarksAreDiscovered()
         {
-            var validationErrors = ReturnValueValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(ThrowingBenchmark))).ToList();
+            var validationErrors = await ReturnValueValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(ThrowingBenchmark))).ToArrayAsync();
 
             Assert.Single(validationErrors);
             Assert.Contains("Oops, sorry", validationErrors.Single().Message);
@@ -29,9 +25,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void InconsistentReturnValuesAreDiscovered()
+        public async Task InconsistentReturnValuesAreDiscovered()
         {
-            var validationErrors = AssertInconsistent<InconsistentResults>();
+            var validationErrors = await AssertInconsistent<InconsistentResults>();
             Assert.Single(validationErrors);
         }
 
@@ -45,9 +41,9 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void NoDuplicateResultsArePrinted()
+        public async Task NoDuplicateResultsArePrinted()
         {
-            var validationErrors = AssertInconsistent<InconsistentResultsWithMultipleJobs>();
+            var validationErrors = await AssertInconsistent<InconsistentResultsWithMultipleJobs>();
             Assert.Single(validationErrors);
 
             var allInstancesOfFoo = Regex.Matches(validationErrors.Single().Message, @"\bFoo\b");
@@ -65,8 +61,8 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void ConsistentReturnValuesAreOmitted()
-            => AssertConsistent<ConsistentResults>();
+        public async Task ConsistentReturnValuesAreOmitted()
+            => await AssertConsistent<ConsistentResults>();
 
         public class ConsistentResults
         {
@@ -78,8 +74,8 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void BenchmarksWithOnlyVoidMethodsAreOmitted()
-            => AssertConsistent<VoidMethods>();
+        public async Task BenchmarksWithOnlyVoidMethodsAreOmitted()
+            => await AssertConsistent<VoidMethods>();
 
         public class VoidMethods
         {
@@ -91,8 +87,8 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void VoidMethodsAreIgnored()
-            => AssertConsistent<ConsistentResultsWithVoidMethod>();
+        public async Task VoidMethodsAreIgnored()
+            => await AssertConsistent<ConsistentResultsWithVoidMethod>();
 
         public class ConsistentResultsWithVoidMethod
         {
@@ -107,8 +103,8 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void ConsistentReturnValuesInParameterGroupAreOmitted()
-            => AssertConsistent<ConsistentResultsPerParameterGroup>();
+        public async Task ConsistentReturnValuesInParameterGroupAreOmitted()
+            => await AssertConsistent<ConsistentResultsPerParameterGroup>();
 
         public class ConsistentResultsPerParameterGroup
         {
@@ -123,10 +119,10 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void InconsistentReturnValuesInParameterGroupAreDetected()
+        public async Task InconsistentReturnValuesInParameterGroupAreDetected()
         {
-            var validationErrors = AssertInconsistent<InconsistentResultsPerParameterGroup>();
-            Assert.Equal(2, validationErrors.Count);
+            var validationErrors = await AssertInconsistent<InconsistentResultsPerParameterGroup>();
+            Assert.Equal(2, validationErrors.Length);
         }
 
         public class InconsistentResultsPerParameterGroup
@@ -142,34 +138,34 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void ConsistentCollectionsAreOmitted()
-            => AssertConsistent<ConsistentCollectionReturnType>();
+        public async Task ConsistentCollectionsAreOmitted()
+            => await AssertConsistent<ConsistentCollectionReturnType>();
 
         public class ConsistentCollectionReturnType
         {
             [Benchmark]
-            public List<int> Foo() => new List<int> { 1, 2, 3 };
+            public List<int> Foo() => [1, 2, 3];
 
             [Benchmark]
-            public int[] Bar() => new[] { 1, 2, 3 };
+            public int[] Bar() => [1, 2, 3];
         }
 
         [Fact]
-        public void InconsistentCollectionsAreDetected()
-            => AssertInconsistent<InconsistentCollectionReturnType>();
+        public async Task InconsistentCollectionsAreDetected()
+            => await AssertInconsistent<InconsistentCollectionReturnType>();
 
         public class InconsistentCollectionReturnType
         {
             [Benchmark]
-            public List<int> Foo() => new List<int> { 1, 2, 3 };
+            public List<int> Foo() => [1, 2, 3];
 
             [Benchmark]
-            public int[] Bar() => new[] { 1, 42, 3 };
+            public int[] Bar() => [1, 42, 3];
         }
 
         [Fact]
-        public void ConsistentDictionariesAreOmitted()
-            => AssertConsistent<ConsistentDictionaryReturnType>();
+        public async Task ConsistentDictionariesAreOmitted()
+            => await AssertConsistent<ConsistentDictionaryReturnType>();
 
         public class ConsistentDictionaryReturnType
         {
@@ -181,8 +177,8 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void InconsistentDictionariesAreDetected()
-            => AssertInconsistent<InconsistentDictionaryReturnType>();
+        public async Task InconsistentDictionariesAreDetected()
+            => await AssertInconsistent<InconsistentDictionaryReturnType>();
 
         public class InconsistentDictionaryReturnType
         {
@@ -194,8 +190,8 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void ConsistentCustomEquatableImplementationIsOmitted()
-            => AssertConsistent<ConsistentCustomEquatableReturnType>();
+        public async Task ConsistentCustomEquatableImplementationIsOmitted()
+            => await AssertConsistent<ConsistentCustomEquatableReturnType>();
 
         public class ConsistentCustomEquatableReturnType
         {
@@ -207,8 +203,8 @@ namespace BenchmarkDotNet.Tests.Validators
         }
 
         [Fact]
-        public void InconsistentCustomEquatableImplementationIsDetected()
-            => AssertInconsistent<InconsistentCustomEquatableReturnType>();
+        public async Task InconsistentCustomEquatableImplementationIsDetected()
+            => await AssertInconsistent<InconsistentCustomEquatableReturnType>();
 
         public class InconsistentCustomEquatableReturnType
         {
@@ -221,25 +217,75 @@ namespace BenchmarkDotNet.Tests.Validators
 
         public class CustomEquatableA : IEquatable<CustomEquatableB>
         {
-            public bool Equals(CustomEquatableB other) => other != null;
+            public bool Equals(CustomEquatableB? other) => other != null;
 
-            public override bool Equals(object obj) => false; // Intentionally bad implementation
+            public override bool Equals(object? obj) => false; // Intentionally bad implementation
 
             public override int GetHashCode() => 0;
         }
 
         public class CustomEquatableB : IEquatable<CustomEquatableA>
         {
-            public bool Equals(CustomEquatableA other) => other != null;
+            public bool Equals(CustomEquatableA? other) => other != null;
 
-            public override bool Equals(object obj) => false; // Intentionally bad implementation
+            public override bool Equals(object? obj) => false; // Intentionally bad implementation
 
             public override int GetHashCode() => 0;
         }
 
         [Fact]
-        public void ConsistentBenchmarksAlteringParameterAreOmitted()
-            => AssertConsistent<ConsistentAlterParam>();
+        public async Task ConsistentAsyncEnumerablesAreOmitted()
+            => await AssertConsistent<ConsistentAsyncEnumerableReturnType>();
+
+        public class ConsistentAsyncEnumerableReturnType
+        {
+            [Benchmark]
+            public async IAsyncEnumerable<int> Foo()
+            {
+                await Task.Yield();
+                yield return 1;
+                yield return 2;
+                yield return 3;
+            }
+
+            [Benchmark]
+            public async IAsyncEnumerable<int> Bar()
+            {
+                yield return 1;
+                yield return 2;
+                await Task.Yield();
+                yield return 3;
+            }
+        }
+
+        [Fact]
+        public async Task InconsistentAsyncEnumerablesAreDetected()
+            => await AssertInconsistent<InconsistentAsyncEnumerableReturnType>();
+
+        public class InconsistentAsyncEnumerableReturnType
+        {
+            [Benchmark]
+            public async IAsyncEnumerable<int> Foo()
+            {
+                await Task.Yield();
+                yield return 1;
+                yield return 2;
+                yield return 3;
+            }
+
+            [Benchmark]
+            public async IAsyncEnumerable<int> Bar()
+            {
+                await Task.Yield();
+                yield return 1;
+                yield return 42;
+                yield return 3;
+            }
+        }
+
+        [Fact]
+        public async Task ConsistentBenchmarksAlteringParameterAreOmitted()
+            => await AssertConsistent<ConsistentAlterParam>();
 
         public class ConsistentAlterParam
         {
@@ -253,21 +299,123 @@ namespace BenchmarkDotNet.Tests.Validators
             public int Bar() => ++Value;
         }
 
-        private static void AssertConsistent<TBenchmark>()
+        // #2083
+        [Fact]
+        public async Task GlobalSetupRunsForEachParamsValue()
+            => await AssertConsistent<GlobalSetupPerParamsValue>();
+
+        public class GlobalSetupPerParamsValue
         {
-            var validationErrors = ReturnValueValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(TBenchmark))).ToList();
+            [Params(2, 3)]
+            public int N { get; set; }
+
+            private int _expected;
+
+            [GlobalSetup]
+            public void Setup() => _expected = N * 10;
+
+            [Benchmark]
+            public int FromSetup() => _expected;
+
+            [Benchmark]
+            public int FromParam() => N * 10;
+        }
+
+        private static async Task AssertConsistent<TBenchmark>()
+        {
+            var validationErrors = await ReturnValueValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(TBenchmark))).ToArrayAsync();
 
             Assert.Empty(validationErrors);
         }
 
-        private static List<ValidationError> AssertInconsistent<TBenchmark>()
+        private static async Task<ValidationError[]> AssertInconsistent<TBenchmark>()
         {
-            var validationErrors = ReturnValueValidator.FailOnError.Validate(BenchmarkConverter.TypeToBenchmarks(typeof(TBenchmark))).ToList();
+            var validationErrors = await ReturnValueValidator.FailOnError.ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(TBenchmark))).ToArrayAsync();
 
             Assert.NotEmpty(validationErrors);
             Assert.All(validationErrors, error => Assert.StartsWith(ErrorMessagePrefix, error.Message));
 
             return validationErrors;
+        }
+
+        [Fact]
+        public async Task ARefStructCurrentIsLeftOutOfTheComparisonRatherThanRefused()
+        {
+            // Comparing return values means holding every element, which a ref struct cannot be - so this benchmark
+            // has no comparable value. That leaves it out of the comparison; it must not fail it.
+            var validationErrors = await ReturnValueValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(RefStructCurrentBenchmark)))
+                .ToArrayAsync();
+
+            var skipped = Assert.Single(validationErrors);
+            Assert.Contains("yields by-ref-like elements", skipped.Message);
+            Assert.False(skipped.IsCritical);
+        }
+
+        [Fact]
+        public async Task ARefStructParameterIsLeftOutOfTheComparisonRatherThanRefused()
+        {
+            var validationErrors = await ReturnValueValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(RefStructParameterBenchmark)))
+                .ToArrayAsync();
+
+            var skipped = Assert.Single(validationErrors);
+            Assert.Contains("by-ref-like parameter", skipped.Message);
+            Assert.False(skipped.IsCritical);
+        }
+
+        // The generated code passes a by-ref-like argument natively and runs; reflection cannot box one into the
+        // args array, so the validator can only skip - it must not refuse.
+        public class RefStructParameterBenchmark
+        {
+            public static IEnumerable<object> Values() { yield return new byte[] { 1, 2, 3 }; }
+
+            [Benchmark]
+            [ArgumentsSource(nameof(Values))]
+            public int Run(ReadOnlySpan<byte> bytes) => bytes.Length;
+        }
+
+        [Fact]
+        public async Task ARefStructReturnIsLeftOutOfTheComparisonRatherThanRefused()
+        {
+            var validationErrors = await ReturnValueValidator.FailOnError
+                .ValidateAsync(BenchmarkConverter.TypeToBenchmarks(typeof(RefStructReturnBenchmark)))
+                .ToArrayAsync();
+
+            var skipped = Assert.Single(validationErrors);
+            Assert.Contains("returns by-ref-like value", skipped.Message);
+            Assert.False(skipped.IsCritical);
+        }
+
+        // Reflection cannot box a ref struct to hand it back, so the method cannot even be invoked - the guard has
+        // to come before the call, not around the result.
+        public class RefStructReturnBenchmark
+        {
+            [Benchmark]
+            public ReadOnlySpan<byte> Run() => default;
+        }
+
+        // Both validators read Current through reflection, which cannot hand back a ref struct - so neither can
+        // validate this benchmark, and neither may refuse to run it. Its generated code reads Current strongly
+        // typed and works.
+        public class RefStructCurrentBenchmark
+        {
+            [Benchmark]
+            public SpanEnumerable Enumerating() => default;
+
+            public readonly struct SpanEnumerable
+            {
+                public SpanEnumerator GetAsyncEnumerator(CancellationToken cancellationToken = default) => new();
+            }
+
+            public struct SpanEnumerator
+            {
+                private int index;
+
+                public ReadOnlySpan<byte> Current => default;
+
+                public ValueTask<bool> MoveNextAsync() => new(index++ < 2);
+            }
         }
     }
 }

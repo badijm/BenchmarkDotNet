@@ -1,5 +1,3 @@
-﻿using System;
-
 namespace BenchmarkDotNet.Diagnosers
 {
     public class PerfCollectProfilerConfig

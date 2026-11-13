@@ -1,5 +1,3 @@
-using System;
-using System.IO;
 using BenchmarkDotNet.Toolchains.Results;
 using JetBrains.Annotations;
 
@@ -34,9 +32,9 @@ namespace BenchmarkDotNet.Toolchains.DotNetCli
             => new DotNetCliCommandResult(false, time, standardOutput, standardError);
 
         [PublicAPI]
-        public BuildResult ToBuildResult(GenerateResult generateResult)
-            => IsSuccess || File.Exists(generateResult.ArtifactsPaths.ExecutablePath) // dotnet cli could have successfully built the program, but returned 1 as exit code because it had some warnings
-                ? BuildResult.Success(generateResult)
-                : BuildResult.Failure(generateResult, AllInformation);
+        public BuildResult ToBuildResult(ArtifactsPaths artifactsPaths)
+            => IsSuccess
+                ? BuildResult.Success(artifactsPaths)
+                : BuildResult.Failure(artifactsPaths, AllInformation);
     }
 }

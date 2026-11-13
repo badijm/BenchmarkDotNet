@@ -1,24 +1,30 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Running;
-using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.ConsoleArguments
 {
-    public class CorrectionsSuggester
+    internal sealed class CorrectionsSuggester
     {
         // note This is a heuristic value, we suppose that user can make three or fewer typos.
         private static int PossibleTyposCount => 3;
-        private readonly HashSet<string> possibleBenchmarkNameFilters = new HashSet<string>();
-        private readonly HashSet<string> actualFullBenchmarkNames = new HashSet<string>();
+        private readonly HashSet<string> possibleBenchmarkNameFilters = [];
+        private readonly HashSet<string> actualFullBenchmarkNames = [];
 
-        public CorrectionsSuggester(IReadOnlyList<Type> types)
+        internal CorrectionsSuggester(IReadOnlyList<Type> types)
+            => Populate(TypeFilter.Filter(DefaultConfig.Instance, types));
+
+        private CorrectionsSuggester(BenchmarkRunInfo[] benchmarkRunInfos)
+            => Populate(benchmarkRunInfos);
+
+        internal static async ValueTask<CorrectionsSuggester> CreateAsync(IReadOnlyList<Type> types, CancellationToken cancellationToken = default)
+            => new(await TypeFilter.FilterAsync(DefaultConfig.Instance, types, cancellationToken).ConfigureAwait());
+
+        private void Populate(BenchmarkRunInfo[] benchmarkRunInfos)
         {
-            foreach (var benchmarkRunInfo in TypeFilter.Filter(DefaultConfig.Instance, types))
+            foreach (var benchmarkRunInfo in benchmarkRunInfos)
             {
                 foreach (var benchmarkCase in benchmarkRunInfo.BenchmarksCases)
                 {
@@ -34,8 +40,7 @@ namespace BenchmarkDotNet.ConsoleArguments
 
         public string[] SuggestFor(string userInput)
         {
-            if (userInput == null)
-                throw new ArgumentNullException(nameof(userInput));
+            ArgumentNullException.ThrowIfNull(userInput);
 
             var calculator = new LevenshteinDistanceCalculator();
             return possibleBenchmarkNameFilters

@@ -1,4 +1,3 @@
-﻿using System;
 using System.Runtime.CompilerServices;
 // ReSharper disable UnusedMember.Global
 
@@ -23,9 +22,9 @@ namespace BenchmarkDotNet.IntegrationTests.InProcess.EmitTests
         public int Value;
     }
 
-    public class CustomStructConsumable<T>
+    public struct CustomStructConsumable<T>
     {
-        public T Value;
+        public required T? Value;
     }
 
     public class CustomClassConsumable
@@ -34,7 +33,7 @@ namespace BenchmarkDotNet.IntegrationTests.InProcess.EmitTests
 
     public class CustomClassConsumable<T>
     {
-        public T Value;
+        public required T? Value;
     }
 
     public struct CustomAwaitableStruct

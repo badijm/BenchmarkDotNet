@@ -1,5 +1,3 @@
-﻿using System;
-using System.Linq;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
@@ -11,8 +9,6 @@ using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.Loggers;
 using BenchmarkDotNet.Tests.XUnit;
 using BenchmarkDotNet.Toolchains;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -22,15 +18,15 @@ namespace BenchmarkDotNet.IntegrationTests
 
         public MultipleRuntimesTest(ITestOutputHelper outputHelper) => output = outputHelper;
 
-        [FactWindowsOnly("CLR is a valid job only on Windows")]
+        [FactEnvSpecific("CLR is a valid job only on Windows", EnvRequirement.WindowsOnly)]
         [Trait(Constants.Category, Constants.BackwardCompatibilityCategory)]
         public void SingleBenchmarkCanBeExecutedForMultipleRuntimes()
         {
             var summary = BenchmarkRunner
                 .Run<C>(
                     ManualConfig.CreateEmpty()
-                        .AddJob(Job.Dry.WithRuntime(CoreRuntime.Core70).WithPlatform(Platform.X64).WithId("Core"))
-                        .AddJob(Job.Dry.WithRuntime(ClrRuntime.Net462).WithId("Framework"))
+                        .AddJob(Job.Dry.WithRuntime(CoreRuntime.Core10_0).WithId("Core"))
+                        .AddJob(Job.Dry.WithRuntime(ClrRuntime.Net472).WithId("Framework"))
                         .AddColumnProvider(DefaultColumnProviders.Instance)
                         .AddLogger(new OutputLogger(output)));
 
@@ -41,17 +37,17 @@ namespace BenchmarkDotNet.IntegrationTests
             Assert.True(summary.Reports.All(report => report.AllMeasurements.Any()));
 
             Assert.True(summary.Reports
-                .Single(report => report.BenchmarkCase.Job.Environment.Runtime is ClrRuntime)
+                .Single(report => report.BenchmarkCase.GetRuntime() is ClrRuntime)
                 .ExecuteResults
                 .Any());
 
             Assert.True(summary.Reports
-                .Single(report => report.BenchmarkCase.Job.Environment.Runtime is CoreRuntime)
+                .Single(report => report.BenchmarkCase.GetRuntime() is CoreRuntime)
                 .ExecuteResults
                 .Any());
 
             Assert.Contains(".NET Framework", summary.AllRuntimes);
-            Assert.Contains(".NET 7.0", summary.AllRuntimes);
+            Assert.Contains(".NET 10.0", summary.AllRuntimes);
         }
     }
 
@@ -61,7 +57,7 @@ namespace BenchmarkDotNet.IntegrationTests
         [Benchmark]
         public void B()
         {
-            Console.WriteLine($"// {RuntimeInformation.GetCurrentRuntime().GetToolchain()}");
+            Console.WriteLine($"// {Job.Default.GetToolchain()}");
         }
     }
 }

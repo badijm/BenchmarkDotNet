@@ -1,8 +1,7 @@
-﻿using System.Collections.Generic;
+using BenchmarkDotNet.Diagnosers;
+using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Running;
 using Microsoft.Diagnostics.Tracing.Session;
-using BenchmarkDotNet.Loggers;
-using BenchmarkDotNet.Diagnosers;
 
 namespace BenchmarkDotNet.Diagnostics.Windows
 {
@@ -16,7 +15,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
 
         private readonly bool logFailuresOnly = true;
         private readonly bool filterByNamespace = true;
-        private string expectedNamespace;
+        private string expectedNamespace = default!;
 
         public TailCallDiagnoser() { }
 
@@ -31,7 +30,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
             this.filterByNamespace = filterByNamespace;
         }
 
-        public override IEnumerable<string> Ids => new[] { nameof(TailCallDiagnoser) };
+        public override IEnumerable<string> Ids => [nameof(TailCallDiagnoser)];
 
         public string ShortName => "tail";
 

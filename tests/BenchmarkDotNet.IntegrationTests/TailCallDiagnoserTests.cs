@@ -1,18 +1,16 @@
-﻿#if NETFRAMEWORK
+#if NETFRAMEWORK
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnostics.Windows;
 using BenchmarkDotNet.Environments;
+using BenchmarkDotNet.IntegrationTests.Xunit;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Tests.Loggers;
+using BenchmarkDotNet.Tests.XUnit;
 using System.Collections.Generic;
 using System.Linq;
-using BenchmarkDotNet.IntegrationTests.Xunit;
-using BenchmarkDotNet.Tests.XUnit;
-using Xunit;
-using Xunit.Abstractions;
 
 namespace BenchmarkDotNet.IntegrationTests
 {
@@ -27,11 +25,11 @@ namespace BenchmarkDotNet.IntegrationTests
         }
 
         public static IEnumerable<object[]> GetJits()
-            => new[]
-            {
-                new object[] { Jit.LegacyJit, Platform.X64, ClrRuntime.Net462 }, // 64bit LegacyJit for desktop .NET
-                new object[] { Jit.RyuJit, Platform.X64, ClrRuntime.Net462 }, // RyuJit for desktop .NET
-            };
+            =>
+            [
+                [Jit.LegacyJit, Platform.X64, ClrRuntime.Net472], // 64bit LegacyJit for desktop .NET
+                [Jit.RyuJit, Platform.X64, ClrRuntime.Net472], // RyuJit for desktop .NET
+            ];
 
         public class TailCallBenchmarks
         {
@@ -52,8 +50,8 @@ namespace BenchmarkDotNet.IntegrationTests
             public long Factorial() => FactorialWithoutTailing(7);
         }
 
-        [TheoryWindowsOnly(WindowsOnly)]
-        [MemberData(nameof(GetJits))]
+        [TheoryEnvSpecific(WindowsOnly, EnvRequirement.WindowsOnly)]
+        [MemberData(nameof(GetJits), DisableDiscoveryEnumeration = true)]
         [Trait(Constants.Category, Constants.BackwardCompatibilityCategory)]
         public void TailCallDiagnoserCatchesTailCallEvents(Jit jit, Platform platform, Runtime runtime)
         {
@@ -62,8 +60,8 @@ namespace BenchmarkDotNet.IntegrationTests
             Assert.Contains(output.CapturedOutput, x => x.Text.Contains(TAIL_CALL_MARK));
         }
 
-        [TheoryWindowsOnly(WindowsOnly)]
-        [MemberData(nameof(GetJits))]
+        [TheoryEnvSpecific(WindowsOnly, EnvRequirement.WindowsOnly)]
+        [MemberData(nameof(GetJits), DisableDiscoveryEnumeration = true)]
         [Trait(Constants.Category, Constants.BackwardCompatibilityCategory)]
         public void TailCallDiagnoserNotCatchesTailCallEvents(Jit jit, Platform platform, Runtime runtime)
         {

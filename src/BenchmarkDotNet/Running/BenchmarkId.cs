@@ -1,7 +1,7 @@
-﻿using System;
-using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Exporters;
 using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.Helpers;
+using BenchmarkDotNet.Helpers.Hashing;
 using JetBrains.Annotations;
 
 namespace BenchmarkDotNet.Running
@@ -26,13 +26,15 @@ namespace BenchmarkDotNet.Running
 
         [PublicAPI] public bool Equals(BenchmarkId other) => Value == other.Value;
 
-        public override bool Equals(object obj) => throw new InvalidOperationException("boxing");
+        public override bool Equals(object? obj) => throw new InvalidOperationException("boxing");
 
         public override int GetHashCode() => Value;
 
-        public string ToArguments() => $"--benchmarkName {FullBenchmarkName.EscapeCommandLine()} --job {JobId.EscapeCommandLine()} --benchmarkId {Value}";
+        public string ToArguments(int port, Diagnosers.RunMode diagnoserRunMode)
+            => $"{IpcHelper.PortDescriptor} {port} --benchmarkName {FullBenchmarkName.EscapeCommandLine()} --job {JobId.EscapeCommandLine()} --diagnoserRunMode {(int) diagnoserRunMode} --benchmarkId {Value}";
 
-        public string ToArguments(string fromBenchmark, string toBenchmark) => $"{AnonymousPipesHost.AnonymousPipesDescriptors} {fromBenchmark} {toBenchmark} {ToArguments()}";
+        public string ToArguments(string ipcDirectory, Diagnosers.RunMode diagnoserRunMode)
+            => $"{IpcHelper.DirDescriptor} {ipcDirectory.EscapeCommandLine()} --benchmarkName {FullBenchmarkName.EscapeCommandLine()} --job {JobId.EscapeCommandLine()} --diagnoserRunMode {(int) diagnoserRunMode} --benchmarkId {Value}";
 
         public override string ToString() => Value.ToString();
 
@@ -48,7 +50,7 @@ namespace BenchmarkDotNet.Running
             string typeName = FullNameProvider.GetTypeName(benchmark.Descriptor.Type);
             string methodName = benchmark.Descriptor.WorkloadMethod.Name;
             string paramsHash = benchmark.HasParameters
-                ? "paramsHash_" + Hashing.HashString(FullNameProvider.GetMethodName(benchmark)).ToString()
+                ? "paramsHash_" + MurmurHash.HashString(FullNameProvider.GetMethodName(benchmark)).ToString()
                 : string.Empty;
 
             return $"{typeName}.{methodName}({paramsHash})";

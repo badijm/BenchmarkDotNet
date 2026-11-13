@@ -1,19 +1,16 @@
-﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Helpers;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Tests.XUnit;
 using System.Buffers.Tests;
-using System.Linq;
-using System.Threading.Tasks;
-using Xunit;
 
 namespace BenchmarkDotNet.Tests
 {
     public class ArtifactFileNameHelperTests
     {
-        [FactWindowsOnly(nonWindowsSkipReason: "ETW Sessions can be created only on Windows")]
+        [FactEnvSpecific("ETW Sessions can be created only on Windows", EnvRequirement.WindowsOnly)]
         public void OnWindowsWeMustAlwaysUseOldLongPathsLimitForSessionFiles()
         {
             var config = DefaultConfig.Instance
@@ -62,7 +59,7 @@ namespace System.Buffers.Tests
 
         private static T IterateAll(T[] arr)
         {
-            T ret = default;
+            T ret = default!;
             foreach (T item in arr)
             {
                 ret = item;

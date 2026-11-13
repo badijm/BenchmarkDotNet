@@ -1,4 +1,3 @@
-﻿using System;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Order;
 
@@ -9,9 +8,10 @@ namespace BenchmarkDotNet.Attributes
     {
         public OrdererAttribute(
             SummaryOrderPolicy summaryOrderPolicy = SummaryOrderPolicy.Default,
-            MethodOrderPolicy methodOrderPolicy = MethodOrderPolicy.Declared)
+            MethodOrderPolicy methodOrderPolicy = MethodOrderPolicy.Declared,
+            JobOrderPolicy jobOrderPolicy = JobOrderPolicy.Numeric)
         {
-            Config = ManualConfig.CreateEmpty().WithOrderer(new DefaultOrderer(summaryOrderPolicy, methodOrderPolicy));
+            Config = ManualConfig.CreateEmpty().WithOrderer(new DefaultOrderer(summaryOrderPolicy, methodOrderPolicy, jobOrderPolicy));
         }
 
         public IConfig Config { get; }

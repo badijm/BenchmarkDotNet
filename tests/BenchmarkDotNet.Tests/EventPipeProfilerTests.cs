@@ -1,10 +1,8 @@
-﻿using BenchmarkDotNet.Diagnosers;
+using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Engines;
 using Microsoft.Diagnostics.NETCore.Client;
 using Microsoft.Diagnostics.Tracing.Parsers;
 using System.Diagnostics.Tracing;
-using System.Linq;
-using Xunit;
 
 namespace BenchmarkDotNet.Tests
 {
@@ -33,14 +31,14 @@ namespace BenchmarkDotNet.Tests
             var defaultSettings = new EventPipeProvider(
                 DotNetRuntime,
                 EventLevel.Informational,
-                (long)ClrTraceEventParser.Keywords.Default);
+                (long) ClrTraceEventParser.Keywords.Default);
 
             var userSettings = new EventPipeProvider(
                 DotNetRuntime,
                 EventLevel.Verbose,
                 (long) (ClrTraceEventParser.Keywords.Default | ClrTraceEventParser.Keywords.JitTracing));
 
-            var result = EventPipeProfiler.MapToProviders(EventPipeProfile.CpuSampling, new[] { userSettings });
+            var result = EventPipeProfiler.MapToProviders(EventPipeProfile.CpuSampling, [userSettings]);
 
             var final = result.Single(x => x.Name == userSettings.Name);
             Assert.Equal(userSettings.EventLevel, final.EventLevel);

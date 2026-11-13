@@ -1,0 +1,390 @@
+using BenchmarkDotNet.Detectors;
+using BenchmarkDotNet.Diagnosers;
+using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.Filters;
+using BenchmarkDotNet.Portability;
+using Microsoft.Diagnostics.Runtime;
+using Microsoft.Diagnostics.Runtime.Interfaces;
+using System.Text.RegularExpressions;
+
+namespace BenchmarkDotNet.Disassemblers
+{
+    internal abstract class ClrMdDisassembler
+
+    {
+        private static readonly ulong MinValidAddress = GetMinValidAddress();
+
+        private static ulong GetMinValidAddress()
+        {
+            // https://github.com/dotnet/BenchmarkDotNet/pull/2413#issuecomment-1688100117
+            if (OsDetector.IsWindows())
+                return ushort.MaxValue + 1;
+            if (OsDetector.IsLinux())
+                return (ulong) Environment.SystemPageSize;
+            if (OsDetector.IsMacOS())
+                return RuntimeInformation.GetCurrentPlatform() switch
+                {
+                    Environments.Platform.X86 or Environments.Platform.X64 => 4096,
+                    Environments.Platform.Arm64 => 0x100000000,
+                    var platform => throw new NotSupportedException($"{platform} is not supported")
+                };
+            throw new NotSupportedException($"{System.Runtime.InteropServices.RuntimeInformation.OSDescription} is not supported");
+        }
+
+        protected static bool IsValidAddress(ulong address)
+            // -1 (ulong.MaxValue) address is invalid, and will crash the runtime in older runtimes. https://github.com/dotnet/runtime/pull/90794
+            // 0 is NULL and therefore never valid.
+            // Addresses less than the minimum virtual address are also invalid.
+            => address != ulong.MaxValue
+                && address != 0
+                && address >= MinValidAddress;
+
+        // When ClrMD's GetMethodByInstructionPointer fails on a call target, the bytes at that
+        // address may be (a) a small JMP/B thunk the JIT inserted because the real callee was too
+        // far for a direct relative branch, or (b) a CoreCLR precode/stub (call-counting stub,
+        // stub precode, fixup precode) — the stable entry point for a tiered method. Architecture
+        // -specific subclasses decode their respective shapes and return the resolved target
+        // (the Target slot for precodes) so TryTranslateAddressToName can retry the lookup.
+        // Best-effort: return false for anything we don't recognise (matches prior behaviour).
+        protected abstract bool TryFollowJumpTrampoline(State state, ulong address, out ulong target);
+
+        private DataTarget Attach(int processId)
+        {
+            bool isSelf = processId == System.Diagnostics.Process.GetCurrentProcess().Id;
+            if (OsDetector.IsWindows() || OsDetector.IsLinux())
+            {
+                // AttachToProcess API does not support attaching to the own process.
+                // https://github.com/microsoft/clrmd/blob/main/doc/FAQ.md#can-i-use-this-api-to-inspect-my-own-process
+                return isSelf
+                    ? DataTarget.CreateSnapshotAndAttach(processId)
+                    : DataTarget.AttachToProcess(processId, suspend: false);
+            }
+
+            if (OsDetector.IsMacOS())
+            {
+                // On macOS it need to use CreateSnapshotAndAttach API instead of AttachToProcess.
+                // https://github.com/microsoft/clrmd/issues/1034
+                return DataTarget.CreateSnapshotAndAttach(processId);
+            }
+            throw new NotSupportedException($"{System.Runtime.InteropServices.RuntimeInformation.OSDescription} is not supported");
+        }
+
+        internal DisassemblyResult AttachAndDisassemble(ClrMdArgs args)
+        {
+            using var dataTarget = Attach(args.ProcessId);
+
+            var runtime = dataTarget.ClrVersions.Single().CreateRuntime();
+
+            var state = new State(runtime, args.RuntimeVersion);
+
+            // Null when the caller passed filters: nothing enqueues the entry point then, so there is none to strip below.
+            IClrMethod? entryPoint = null;
+
+            if (args.Filters.Length > 0)
+            {
+                FilterAndEnqueue(state, args);
+            }
+            else
+            {
+                // A type handle is the type's method table, so it cannot resolve to a same-named type of another module.
+                var typeWithBenchmark = args.TypeHandle != IntPtr.Zero
+                    ? state.Runtime.GetTypeByMethodTable((ulong) args.TypeHandle.ToInt64())
+                        ?? throw new InvalidOperationException($"No type has the method table {args.TypeHandle.ToInt64():X} ({args.TypeName}).")
+                    : state.Runtime.EnumerateModules().Select(module => module.GetTypeByName(args.TypeName)).WhereNotNull().First();
+
+                // The whole signature, because the name alone is not enough: ClrType.Methods also surfaces inherited methods
+                // on the desktop CLR, and ClrMethod.Type reports the type being enumerated rather than the declaring one, so
+                // only the signature distinguishes the generated method from a benchmark member of the same name.
+                // Kept in sync with the disassembler entry method in Templates/BenchmarkType.txt and RunnableEmitter, which
+                // both give it a single Int32 parameter.
+                string entryPointSignature = $"{args.TypeName}.{args.MethodName}(Int32)";
+                entryPoint = typeWithBenchmark.Methods.Single(method => method.Signature == entryPointSignature);
+
+                state.Todo.Enqueue(new MethodInfo(entryPoint, 0));
+            }
+
+            var disassembledMethods = Disassemble(args, state);
+
+            // we don't want to export the disassembler entry point method which is just an artificial method added to get generic types working.
+            // Identified by its native code address rather than its name: a signature does not always carry the declaring
+            // type (see AddressToNameMapping below), so a benchmark method of the same name could match it.
+            var filteredMethods = disassembledMethods.Where(method => method.NativeCode != entryPoint?.NativeCode).ToArray();
+
+            return new DisassemblyResult
+            {
+                Methods = filteredMethods,
+                AddressToNameMapping = state.AddressToNameMapping,
+                PointerSize = (uint) IntPtr.Size
+            };
+        }
+
+        private static void FilterAndEnqueue(State state, ClrMdArgs args)
+        {
+            Regex[] filters = GlobFilter.ToRegex(args.Filters);
+
+            foreach (var module in state.Runtime.EnumerateModules())
+                foreach (var type in module.EnumerateTypeDefToMethodTableMap().Select(map => state.Runtime.GetTypeByMethodTable(map.MethodTable)).WhereNotNull())
+                    foreach (var method in type.Methods.Where(method => method.Signature.IsNotBlank()))
+                    {
+                        if (method.NativeCode > 0)
+                        {
+                            if (!state.AddressToNameMapping.TryGetValue(method.NativeCode, out _))
+                            {
+                                state.AddressToNameMapping.Add(method.NativeCode, method.Signature!);
+                            }
+                        }
+
+                        if (CanBeDisassembled(method))
+                        {
+                            foreach (Regex filter in filters)
+                            {
+                                if (filter.IsMatch(method.Signature!))
+                                {
+                                    state.Todo.Enqueue(new MethodInfo(method,
+                                        depth: args.MaxDepth)); // don't allow for recursive disassembling
+                                    break;
+                                }
+                            }
+                        }
+                    }
+        }
+
+        private DisassembledMethod[] Disassemble(ClrMdArgs args, State state)
+        {
+            var result = new List<DisassembledMethod>();
+            DisassemblySyntax syntax = Enum.Parse<DisassemblySyntax>(args.Syntax);
+
+            using var sourceCodeProvider = new SourceCodeProvider();
+            while (state.Todo.Count != 0)
+            {
+                var methodInfo = state.Todo.Dequeue();
+
+                if (!state.HandledMethods.Add(methodInfo.Method)) // add it now to avoid StackOverflow for recursive methods
+                    continue; // already handled
+
+                if (args.MaxDepth >= methodInfo.Depth)
+                    result.Add(DisassembleMethod(methodInfo, state, args, syntax, sourceCodeProvider));
+            }
+
+            return result.ToArray();
+        }
+
+        private static bool CanBeDisassembled(IClrMethod method) => method.ILOffsetMap.Length > 0 && method.NativeCode > 0;
+
+        private DisassembledMethod DisassembleMethod(MethodInfo methodInfo, State state, ClrMdArgs args, DisassemblySyntax syntax, SourceCodeProvider sourceCodeProvider)
+        {
+            var method = methodInfo.Method;
+
+            if (!CanBeDisassembled(method))
+            {
+                if (method.Attributes.HasFlag(System.Reflection.MethodAttributes.PinvokeImpl))
+                    return CreateEmpty(method, "PInvoke method");
+                var ilInfo = method.GetILInfo();
+                if (ilInfo is null || ilInfo.Length == 0)
+                    return CreateEmpty(method, "Extern method");
+                if (method.CompilationType == MethodCompilationType.None)
+                    return CreateEmpty(method, "Method was not JITted yet.");
+
+                return CreateEmpty(method, $"No valid {nameof(method.ILOffsetMap)} and {nameof(method.HotColdInfo)}");
+            }
+
+            var codes = new List<SourceCode>();
+            if (args.PrintSource && method.ILOffsetMap.Length > 0)
+            {
+                // we use HashSet to prevent from duplicates
+                var uniqueSourceCodeLines = new HashSet<Sharp>(new SharpComparer());
+                // for getting C# code we always use the original ILOffsetMap
+                foreach (var map in method.ILOffsetMap.Where(map => map.StartAddress < map.EndAddress && map.ILOffset >= 0).OrderBy(map => map.StartAddress))
+                    foreach (var sharp in sourceCodeProvider.GetSource(method, map))
+                        uniqueSourceCodeLines.Add(sharp);
+
+                codes.AddRange(uniqueSourceCodeLines);
+            }
+
+            foreach (var map in GetCompleteNativeMap(method, state.Runtime))
+            {
+                codes.AddRange(Decode(map, state, methodInfo.Depth, method, syntax));
+            }
+
+            Map[] maps = args.PrintSource
+                ? codes.GroupBy(code => code.InstructionPointer).OrderBy(group => group.Key).Select(group => new Map() { SourceCodes = group.ToArray() }).ToArray()
+                : [new Map() { SourceCodes = codes.ToArray() }];
+
+            return new DisassembledMethod
+            {
+                Maps = maps,
+                Name = method.Signature ?? "",
+                NativeCode = method.NativeCode
+            };
+        }
+
+        private IEnumerable<Asm> Decode(ILToNativeMap map, State state, int depth, IClrMethod currentMethod, DisassemblySyntax syntax)
+        {
+            ulong startAddress = map.StartAddress;
+            uint size = (uint) (map.EndAddress - map.StartAddress);
+
+            byte[] code = new byte[size];
+
+            int totalBytesRead = 0;
+            do
+            {
+                int bytesRead = state.Runtime.DataTarget.DataReader.Read(startAddress + (ulong) totalBytesRead, new Span<byte>(code, totalBytesRead, (int) size - totalBytesRead));
+                if (bytesRead <= 0)
+                {
+                    throw new EndOfStreamException($"Tried to read {size} bytes for {currentMethod.Signature}, got only {totalBytesRead}");
+                }
+                totalBytesRead += bytesRead;
+            } while (totalBytesRead != size);
+
+            return Decode(code, startAddress, state, depth, currentMethod, syntax);
+        }
+
+        protected abstract IEnumerable<Asm> Decode(byte[] code, ulong startAddress, State state, int depth, IClrMethod currentMethod, DisassemblySyntax syntax);
+
+        private static ILToNativeMap[] GetCompleteNativeMap(IClrMethod method, IClrRuntime runtime)
+        {
+            // it's better to use one single map rather than few small ones
+            // it's simply easier to get next instruction when decoding ;)
+
+            var hotColdInfo = method.HotColdInfo;
+            if (hotColdInfo.HotSize > 0 && hotColdInfo.HotStart > 0)
+            {
+                return hotColdInfo.ColdSize <= 0
+                    ? [new ILToNativeMap() { StartAddress = hotColdInfo.HotStart, EndAddress = hotColdInfo.HotStart + hotColdInfo.HotSize, ILOffset = -1 }]
+                    : [
+                          new ILToNativeMap() { StartAddress = hotColdInfo.HotStart, EndAddress = hotColdInfo.HotStart + hotColdInfo.HotSize, ILOffset = -1 },
+                          new ILToNativeMap() { StartAddress = hotColdInfo.ColdStart, EndAddress = hotColdInfo.ColdStart + hotColdInfo.ColdSize, ILOffset = -1 }
+                      ];
+            }
+
+            return method.ILOffsetMap
+                .Where(map => map.StartAddress < map.EndAddress) // some maps have 0 length?
+                .OrderBy(map => map.StartAddress) // we need to print in the machine code order, not IL! #536
+                .ToArray();
+        }
+
+        private static DisassembledMethod CreateEmpty(IClrMethod method, string reason)
+            => DisassembledMethod.Empty(method.Signature ?? "", method.NativeCode, reason);
+
+        protected void TryTranslateAddressToName(ulong address, bool isAddressPrecodeMD, State state, int depth, IClrMethod currentMethod)
+        {
+            if (!IsValidAddress(address) || state.AddressToNameMapping.ContainsKey(address))
+                return;
+
+            var runtime = state.Runtime;
+
+            var jitHelperFunctionName = runtime.GetJitHelperFunctionName(address);
+            if (jitHelperFunctionName.IsNotBlank())
+            {
+                state.AddressToNameMapping.Add(address, jitHelperFunctionName!);
+                return;
+            }
+
+            var method = runtime.GetMethodByInstructionPointer(address);
+            if (method is null && (address & ((uint) runtime.DataTarget.DataReader.PointerSize - 1)) == 0
+                && runtime.DataTarget.DataReader.ReadPointer(address, out ulong newAddress) && IsValidAddress(newAddress))
+            {
+                method = runtime.GetMethodByInstructionPointer(newAddress);
+            }
+
+            if (method is null)
+            {
+                // Chase trampolines/precodes iteratively: a near JMP/B thunk may target another
+                // near jump, and a stable-entry precode's Target slot may itself currently point at a
+                // tier-0 → tier-1 promotion stub. Bounded by maxHops so a pathological case
+                // (corrupted snapshot, self-pointing thunk) can't loop; visited-set short-circuits
+                // cycles. 8 hops is far more than CoreCLR is known to chain in practice.
+                ulong current = address;
+                HashSet<ulong>? visited = null;
+                const int maxHops = 8;
+                for (int hop = 0; hop < maxHops; hop++)
+                {
+                    if (!TryFollowJumpTrampoline(state, current, out ulong next))
+                        break;
+                    if (next == current)
+                        break;
+                    visited ??= [];
+                    if (!visited.Add(next))
+                        break;
+                    method = runtime.GetMethodByInstructionPointer(next);
+                    if (method is not null)
+                        break;
+                    current = next;
+                }
+            }
+
+            if (method is null)
+            {
+                var methodDescriptor = runtime.GetMethodByHandle(address);
+                if (methodDescriptor is not null)
+                {
+                    if (isAddressPrecodeMD)
+                    {
+                        state.AddressToNameMapping.Add(address, $"Precode of {methodDescriptor.Signature}");
+                        // The precode resolves to a method handle, but if the underlying method has
+                        // already been JITted we still want to disassemble its body — otherwise a
+                        // call routed through a stable-entry precode never enqueues its target.
+                        if (methodDescriptor.NativeCode > 0 && !state.HandledMethods.Contains(methodDescriptor))
+                            state.Todo.Enqueue(new MethodInfo(methodDescriptor, depth + 1));
+                    }
+                    else
+                    {
+                        state.AddressToNameMapping.Add(address, $"MD_{methodDescriptor.Signature}");
+                    }
+                    return;
+                }
+
+                var methodTableName = runtime.GetTypeByMethodTable(address)?.Name;
+                if (methodTableName.IsNotBlank())
+                {
+                    state.AddressToNameMapping.Add(address, $"MT_{methodTableName}");
+                }
+                return;
+            }
+
+            if (method.NativeCode == currentMethod.NativeCode && method.Signature == currentMethod.Signature)
+                return; // in case of a call which is just a jump within the method or a recursive call
+
+            if (!state.HandledMethods.Contains(method))
+                state.Todo.Enqueue(new MethodInfo(method, depth + 1));
+
+            var methodName = method.Signature!;
+            if (!methodName.Any(c => c == '.')) // the method name does not contain namespace and type name
+                methodName = $"{method.Type.Name}.{method.Signature}";
+            state.AddressToNameMapping.Add(address, methodName);
+        }
+
+        protected void FlushCachedDataIfNeeded(IDataReader dataTargetDataReader, ulong address, byte[] buffer)
+        {
+            if (!OsDetector.IsWindows())
+            {
+                if (dataTargetDataReader.Read(address, buffer) <= 0)
+                {
+                    // We don't suspend the benchmark process for the time of disassembling,
+                    // as it would require sudo privileges.
+                    // Because of that, the Tiered JIT thread might still re-compile some methods
+                    // in the meantime when the host process it trying to disassemble the code.
+                    // In such case, Tiered JIT thread might create stubs which requires flushing of the cached data.
+                    dataTargetDataReader.FlushCachedData();
+                }
+            }
+        }
+
+        private class SharpComparer : IEqualityComparer<Sharp>
+        {
+            public bool Equals(Sharp? x, Sharp? y)
+            {
+                if (ReferenceEquals(x, y))
+                    return true;
+                if (x is null || y is null)
+                    return false;
+
+                // sometimes some C# code lines are duplicated because the same line is the best match for multiple ILToNativeMaps
+                // we don't want to confuse the users, so this must also be removed
+                return x.FilePath == y.FilePath && x.LineNumber == y.LineNumber;
+            }
+
+            public int GetHashCode(Sharp obj) => HashCode.Combine(obj.FilePath, obj.LineNumber);
+        }
+    }
+}

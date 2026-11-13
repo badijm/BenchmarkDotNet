@@ -1,17 +1,15 @@
-using System;
-using System.ComponentModel;
-using System.IO;
-using System.Linq;
 using BenchmarkDotNet.Diagnosers;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Exporters;
-using BenchmarkDotNet.Helpers;
-using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Extensions;
+using BenchmarkDotNet.Helpers;
+using BenchmarkDotNet.Helpers.Hashing;
+using BenchmarkDotNet.Loggers;
+using BenchmarkDotNet.Running;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
-using BenchmarkDotNet.Running;
+using System.ComponentModel;
 
 namespace BenchmarkDotNet.Diagnostics.Windows
 {
@@ -26,7 +24,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
 
         internal override Session EnableProviders()
         {
-            var osHeapExe = Path.GetFileName(Path.ChangeExtension(Details.Process.StartInfo.FileName, ".exe"));
+            var osHeapExe = Path.GetFileName(Path.ChangeExtension(Details.Process!.StartInfo.FileName, ".exe"));
             TraceEventSession.EnableWindowsHeapProvider(osHeapExe);
             return this;
         }
@@ -90,7 +88,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
         }
     }
 
-    internal abstract class Session : IDisposable
+    internal abstract class Session : DisposeAtProcessTermination
     {
         private const int MaxSessionNameLength = 128;
 
@@ -114,26 +112,15 @@ namespace BenchmarkDotNet.Diagnostics.Windows
                 BufferSizeMB = config.BufferSizeInMb,
                 CpuSampleIntervalMSec = config.CpuSampleIntervalInMilliseconds,
             };
-
-            Console.CancelKeyPress += OnConsoleCancelKeyPress;
-            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         }
 
-        public void Dispose() => TraceEventSession.Dispose();
-
-        internal void Stop()
+        protected override void Dispose(bool exiting)
         {
-            TraceEventSession.Stop();
-
-            Console.CancelKeyPress -= OnConsoleCancelKeyPress;
-            AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
+            TraceEventSession.Dispose();
+            base.Dispose(exiting);
         }
 
         internal abstract Session EnableProviders();
-
-        private void OnConsoleCancelKeyPress(object sender, ConsoleCancelEventArgs e) => Stop();
-
-        private void OnProcessExit(object sender, EventArgs e) => Stop();
 
         protected static string GetSessionName(BenchmarkCase benchmarkCase)
         {
@@ -142,7 +129,7 @@ namespace BenchmarkDotNet.Diagnostics.Windows
                 return benchmarkName;
 
             // session name is not really used by humans, we can just give it the hashcode value
-            return $"BenchmarkDotNet.EtwProfiler.Session_{Hashing.HashString(benchmarkName)}";
+            return $"BenchmarkDotNet.EtwProfiler.Session_{MurmurHash.HashString(benchmarkName)}";
         }
     }
 }

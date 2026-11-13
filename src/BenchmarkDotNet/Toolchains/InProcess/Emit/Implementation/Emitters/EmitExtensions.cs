@@ -1,7 +1,6 @@
-﻿using System;
-using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.ExceptionServices;
 
 namespace BenchmarkDotNet.Toolchains.InProcess.Emit.Implementation
 {
@@ -15,24 +14,26 @@ namespace BenchmarkDotNet.Toolchains.InProcess.Emit.Implementation
             => ExecuteMethodUsingReflection(assemblyBuilder, nameof(Save), assemblyFileName);
 
         internal static ModuleBuilder DefineDynamicModule(this AssemblyBuilder assemblyBuilder, string moduleName, string moduleFileName)
-            => (ModuleBuilder)ExecuteMethodUsingReflection(assemblyBuilder, nameof(AssemblyBuilder.DefineDynamicModule), moduleName, moduleFileName);
+            => (ModuleBuilder) ExecuteMethodUsingReflection(assemblyBuilder, nameof(AssemblyBuilder.DefineDynamicModule), moduleName, moduleFileName);
 
         internal static AssemblyBuilder DefineDynamicAssembly(this AppDomain domain, AssemblyName assemblyName, AssemblyBuilderAccess assemblyMode, string assemblyDirectory)
-            => (AssemblyBuilder)ExecuteMethodUsingReflection(domain, nameof(AssemblyBuilder.DefineDynamicAssembly), assemblyName, assemblyMode, assemblyDirectory);
+            => (AssemblyBuilder) ExecuteMethodUsingReflection(domain, nameof(AssemblyBuilder.DefineDynamicAssembly), assemblyName, assemblyMode, assemblyDirectory);
 
         private static object ExecuteMethodUsingReflection<T>(T instance, string methodName, params object[] arguments)
         {
             var type = typeof(T);
 
-            var method = type.GetMethod(name: methodName, types: arguments.Select(argument => argument.GetType()).ToArray());
+            var method = type.GetMethod(name: methodName, types: arguments.Select(argument => argument.GetType()).ToArray())!;
 
             try
             {
-                return method.Invoke(instance, parameters: arguments);
+                return method.Invoke(instance, parameters: arguments)!;
             }
             catch (TargetInvocationException wrappedByReflection)
             {
-                throw wrappedByReflection.InnerException;
+                var ex = wrappedByReflection.InnerException ?? wrappedByReflection;
+                ExceptionDispatchInfo.Capture(ex).Throw();
+                return default!;// It's required to suppress error CS0161.
             }
         }
     }

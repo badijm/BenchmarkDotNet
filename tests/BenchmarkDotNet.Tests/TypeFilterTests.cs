@@ -1,8 +1,3 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using Xunit;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.ConsoleArguments;
 using BenchmarkDotNet.Extensions;
@@ -10,7 +5,6 @@ using BenchmarkDotNet.Loggers;
 using BenchmarkDotNet.Tests;
 using BenchmarkDotNet.Tests.Loggers;
 using JetBrains.Annotations;
-using Xunit.Abstractions;
 using TypeFilter = BenchmarkDotNet.Running.TypeFilter;
 
 namespace BenchmarkDotNet.Tests
@@ -24,7 +18,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void ReturnsNoBenchmarksForInvalidTypes()
         {
-            var benchmarks = Filter(new[] { typeof(ClassC) }, new[] { "--filter", "*" });
+            var benchmarks = Filter([typeof(ClassC)], ["--filter", "*"]);
 
             Assert.Empty(benchmarks);
         }
@@ -32,7 +26,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void CanFilterAllBenchmark()
         {
-            var benchmarks = Filter(new[] { typeof(ClassA), typeof(ClassB) }, new[] { "--filter", "*" });
+            var benchmarks = Filter([typeof(ClassA), typeof(ClassB)], ["--filter", "*"]);
 
             Assert.Equal(5, benchmarks.Count);
             Assert.Contains("ClassA.Method1", benchmarks);
@@ -45,7 +39,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void CanFilterAllBenchmarksDuringListAllBenchmarkCase()
         {
-            var benchmarks = Filter(new[] { typeof(ClassA), typeof(ClassB) }, new[] { "--list", "flat" });
+            var benchmarks = Filter([typeof(ClassA), typeof(ClassB)], ["--list", "flat"]);
 
             Assert.Equal(5, benchmarks.Count);
             Assert.Contains("ClassA.Method1", benchmarks);
@@ -58,7 +52,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void CanFilterBenchmarksDuringListAllBenchmarkCase()
         {
-            var benchmarks = Filter(new[] { typeof(ClassA), typeof(ClassB) }, new[] { "--list", "flat", "--filter", "*ClassB*" });
+            var benchmarks = Filter([typeof(ClassA), typeof(ClassB)], ["--list", "flat", "--filter", "*ClassB*"]);
 
             Assert.Equal(3, benchmarks.Count);
             Assert.Contains("ClassB.Method1", benchmarks);
@@ -69,7 +63,7 @@ namespace BenchmarkDotNet.Tests
         [Fact]
         public void CanSelectMethods()
         {
-            var benchmarks = Filter(new[] { typeof(ClassA), typeof(ClassB) }, new[] { "--filter", "*Method2", "*Method3" });
+            var benchmarks = Filter([typeof(ClassA), typeof(ClassB)], ["--filter", "*Method2", "*Method3"]);
 
             Assert.Equal(3, benchmarks.Count);
             Assert.Contains("ClassA.Method2", benchmarks);
@@ -81,8 +75,8 @@ namespace BenchmarkDotNet.Tests
         public void CanSelectMethodsWithFullName()
         {
             var benchmarks = Filter(
-                new[] { typeof(ClassA), typeof(ClassB) },
-                new[] { "--filter", "BenchmarkDotNet.Tests.ClassA.Method2", "BenchmarkDotNet.Tests.ClassB.Method3" });
+                [typeof(ClassA), typeof(ClassB)],
+                ["--filter", "BenchmarkDotNet.Tests.ClassA.Method2", "BenchmarkDotNet.Tests.ClassB.Method3"]);
 
             Assert.Equal(2, benchmarks.Count);
             Assert.Contains("ClassA.Method2", benchmarks);
@@ -93,8 +87,8 @@ namespace BenchmarkDotNet.Tests
         public void CanSelectClassesUsingPatters()
         {
             var benchmarks = Filter(
-                new[] { typeof(ClassA), typeof(ClassB) },
-                new[] { "--filter", "*ClassC*", "*ClassA*" });
+                [typeof(ClassA), typeof(ClassB)],
+                ["--filter", "*ClassC*", "*ClassA*"]);
 
             // ClassC not matched as it has NO methods with the [Benchmark] attribute
             Assert.Equal(2, benchmarks.Count);
@@ -106,8 +100,8 @@ namespace BenchmarkDotNet.Tests
         public void CanNotSelectClassesUsingTypeNames()
         {
             var benchmarks = Filter(
-                new[] { typeof(ClassA), typeof(ClassB) },
-                new[] { "--filter", "ClassC", "ClassA" });
+                [typeof(ClassA), typeof(ClassB)],
+                ["--filter", "ClassC", "ClassA"]);
 
             Assert.Empty(benchmarks); // it's not supported anymore
         }
@@ -116,8 +110,8 @@ namespace BenchmarkDotNet.Tests
         public void CanSelectClassesWithFullName()
         {
             var benchmarks = Filter(
-                new[] { typeof(ClassA), typeof(ClassB) },
-                new[] { "--filter", "BenchmarkDotNet.Tests.ClassC*", "BenchmarkDotNet.Tests.ClassA*" });
+                [typeof(ClassA), typeof(ClassB)],
+                ["--filter", "BenchmarkDotNet.Tests.ClassC*", "BenchmarkDotNet.Tests.ClassA*"]);
 
             // ClassC not matched as it has NO methods with the [Benchmark] attribute
             Assert.Equal(2, benchmarks.Count);
@@ -129,8 +123,8 @@ namespace BenchmarkDotNet.Tests
         public void CanSelectClassesUsingPattern()
         {
             var benchmarks = Filter(
-                new[] { typeof(ClassA), typeof(ClassB) },
-                new[] { "--filter", "BenchmarkDotNet.Tests.Class*A*" });
+                [typeof(ClassA), typeof(ClassB)],
+                ["--filter", "BenchmarkDotNet.Tests.Class*A*"]);
 
             // ClassC not matched as it has NO methods with the [Benchmark] attribute
             Assert.Equal(2, benchmarks.Count);
@@ -142,8 +136,8 @@ namespace BenchmarkDotNet.Tests
         public void CanSelectAttributes()
         {
             var benchmarks = Filter(
-                new[] { typeof(ClassA), typeof(ClassB), typeof(NOTTests.ClassD) },
-                new[] { "--attribute", "Run" });
+                [typeof(ClassA), typeof(ClassB), typeof(NOTTests.ClassD)],
+                ["--attribute", "Run"]);
 
             Assert.Equal(3, benchmarks.Count);
             Assert.Contains("ClassA.Method1", benchmarks);
@@ -155,8 +149,8 @@ namespace BenchmarkDotNet.Tests
         public void CanSelectAttributesWithFullName()
         {
             var benchmarks = Filter(
-                new[] { typeof(ClassA), typeof(ClassB), typeof(NOTTests.ClassD) },
-                new[] { "--attribute", "DontRunAttribute" });
+                [typeof(ClassA), typeof(ClassB), typeof(NOTTests.ClassD)],
+                ["--attribute", "DontRunAttribute"]);
 
             Assert.Equal(4, benchmarks.Count);
             Assert.Contains("ClassB.Method1", benchmarks);
@@ -169,8 +163,8 @@ namespace BenchmarkDotNet.Tests
         public void CanSelectNamespaces()
         {
             var benchmarks = Filter(
-                new[] { typeof(ClassA), typeof(ClassB), typeof(NOTTests.ClassD) },
-                new[] { "--filter", "BenchmarkDotNet.Tests*" });
+                [typeof(ClassA), typeof(ClassB), typeof(NOTTests.ClassD)],
+                ["--filter", "BenchmarkDotNet.Tests*"]);
 
             Assert.Equal(5, benchmarks.Count);
             Assert.Contains("ClassA.Method1", benchmarks);
@@ -184,33 +178,44 @@ namespace BenchmarkDotNet.Tests
         public void ClassAndMethodsCanCombined()
         {
             var benchmarks = Filter(
-                new[] { typeof(ClassA), typeof(ClassB), typeof(NOTTests.ClassD) },
-                new[] { "--filter", "*ClassA.Method2", "*ClassA.Method3" });
+                [typeof(ClassA), typeof(ClassB), typeof(NOTTests.ClassD)],
+                ["--filter", "*ClassA.Method2", "*ClassA.Method3"]);
 
             Assert.Single(benchmarks);
             Assert.Contains("ClassA.Method2", benchmarks);
         }
 
         [Fact]
+        public void MethodCanBeFilteredByParameters()
+        {
+            var benchmarks = Filter(
+                [typeof(ClassA), typeof(ClassB), typeof(ClassE), typeof(NOTTests.ClassD)],
+                ["--filter", "BenchmarkDotNet.Tests.ClassE.Method1(value: 0)"]);
+
+            Assert.Single(benchmarks);
+            Assert.Contains("ClassE.Method1", benchmarks);
+        }
+
+        [Fact]
         public void GenericTypesCanBeFilteredByDisplayName()
         {
             var benchmarks = Filter(
-                new[] { typeof(SomeGeneric<>) },
-                new[] { "--filter", "*SomeGeneric<Int32>*" });
+                [typeof(SomeGeneric<>)],
+                ["--filter", "*SomeGeneric<Int32>*"]);
 
             Assert.Single(benchmarks);
             Assert.Contains("SomeGeneric<Int32>.Create", benchmarks);
         }
 
-        private HashSet<string> Filter(Type[] types, string[] args, ILogger logger = null)
+        private HashSet<string> Filter(Type[] types, string[] args, ILogger? logger = null)
         {
             var nonNullLogger = logger ?? new OutputLogger(Output);
 
             var config = ConfigParser.Parse(args, nonNullLogger);
 
-            var runnableTypes = TypeFilter.GetTypesWithRunnableBenchmarks(types, Array.Empty<Assembly>(), nonNullLogger);
+            var runnableTypes = TypeFilter.GetTypesWithRunnableBenchmarks(types, [], nonNullLogger);
 
-            return new HashSet<string>(TypeFilter.Filter(config.config, runnableTypes.runnable)
+            return new HashSet<string>(TypeFilter.Filter(config.config!, runnableTypes.runnable)
                 .SelectMany(runInfo => runInfo.BenchmarksCases)
                 .Select(benchmark => $"{benchmark.Descriptor.Type.GetDisplayName()}.{benchmark.Descriptor.WorkloadMethod.Name}"));
         }
@@ -265,6 +270,21 @@ namespace BenchmarkDotNet.Tests
     {
         [Benchmark]
         public T Create() => Activator.CreateInstance<T>();
+    }
+
+    [Run]
+    public class ClassE
+    {
+        public static IEnumerable<object> Values =>
+        [
+            uint.MinValue,
+            (uint)12345, // same value used by other tests to compare the perf
+            uint.MaxValue,
+        ];
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Values))]
+        public string Method1(uint value) => value.ToString();
     }
 }
 
